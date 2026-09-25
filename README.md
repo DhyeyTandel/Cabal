@@ -1,6 +1,6 @@
-# cab-router
+# Cabal
 
-A REST service that plans employee transport. You give it employee home locations, a
+*Cab + algorithm.* A REST service that plans employee transport. You give it employee home locations, a
 shift time and a cab size. It decides who rides together, the order the cab collects
 them in, and when each person should be at their gate. When someone cancels or books
 late, it repairs the plan without reshuffling everyone else.
