@@ -1,7 +1,10 @@
 package dev.dhyey.cabrouter.domain;
 
 import dev.dhyey.cabrouter.routing.Direction;
+import dev.dhyey.cabrouter.routing.Fleet;
 import jakarta.persistence.CascadeType;
+import jakarta.persistence.CollectionTable;
+import jakarta.persistence.ElementCollection;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -43,7 +46,11 @@ public class RoutePlan {
     @Enumerated(EnumType.STRING)
     private Direction direction;
 
-    private int cabCapacity;
+    @ElementCollection
+    @CollectionTable(name = "plan_vehicle_types", joinColumns = @JoinColumn(name = "plan_id"))
+    @OrderBy("seats")
+    private List<PlanVehicleType> fleet = new ArrayList<>();
+
     private int maxRideMinutes;
     private int revision;
 
@@ -60,11 +67,13 @@ public class RoutePlan {
     protected RoutePlan() {
     }
 
-    public RoutePlan(Office office, LocalDateTime shiftTime, Direction direction, int cabCapacity, int maxRideMinutes) {
+    public RoutePlan(Office office, LocalDateTime shiftTime, Direction direction, Fleet fleet, int maxRideMinutes) {
         this.office = office;
         this.shiftTime = shiftTime;
         this.direction = direction;
-        this.cabCapacity = cabCapacity;
+        for (Fleet.Entry e : fleet.entries()) {
+            this.fleet.add(new PlanVehicleType(e.type().name(), e.type().seats(), e.available()));
+        }
         this.maxRideMinutes = maxRideMinutes;
         this.revision = 1;
         this.createdAt = Instant.now();
@@ -103,8 +112,12 @@ public class RoutePlan {
         return direction;
     }
 
-    public int getCabCapacity() {
-        return cabCapacity;
+    public Fleet fleet() {
+        return new Fleet(fleet.stream().map(PlanVehicleType::toEntry).toList());
+    }
+
+    public List<PlanVehicleType> getFleet() {
+        return fleet;
     }
 
     public int getMaxRideMinutes() {

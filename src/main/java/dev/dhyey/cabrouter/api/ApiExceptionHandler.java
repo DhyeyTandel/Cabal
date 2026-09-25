@@ -1,9 +1,11 @@
 package dev.dhyey.cabrouter.api;
 
+import dev.dhyey.cabrouter.routing.FleetExhaustedException;
 import dev.dhyey.cabrouter.service.ConflictException;
 import dev.dhyey.cabrouter.service.InvalidRequestException;
 import dev.dhyey.cabrouter.service.NotFoundException;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -26,6 +28,12 @@ public class ApiExceptionHandler {
     @ExceptionHandler(ConflictException.class)
     ProblemDetail conflict(ConflictException e) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.getMessage());
+    }
+
+    /** The request is well formed but the fleet cannot serve it: 422. */
+    @ExceptionHandler(FleetExhaustedException.class)
+    ProblemDetail fleetExhausted(FleetExhaustedException e) {
+        return ProblemDetail.forStatusAndDetail(HttpStatusCode.valueOf(422), e.getMessage());
     }
 
     @ExceptionHandler(ObjectOptimisticLockingFailureException.class)

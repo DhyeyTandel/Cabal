@@ -12,14 +12,18 @@ import dev.dhyey.cabrouter.domain.RoutePlan;
 import dev.dhyey.cabrouter.domain.RoutePlanRepository;
 import dev.dhyey.cabrouter.domain.RouteStop;
 import dev.dhyey.cabrouter.routing.Direction;
+import dev.dhyey.cabrouter.api.dto.VehicleSpec;
 import dev.dhyey.cabrouter.routing.EtaCalculator;
+import dev.dhyey.cabrouter.routing.Fleet;
 import dev.dhyey.cabrouter.routing.GeoPoint;
 import dev.dhyey.cabrouter.routing.PlannedCab;
 import dev.dhyey.cabrouter.routing.RoutePlanner;
 import dev.dhyey.cabrouter.routing.RoutingParams;
+import dev.dhyey.cabrouter.routing.ShiftContext;
 import dev.dhyey.cabrouter.routing.Stop;
 import dev.dhyey.cabrouter.routing.StopTiming;
 import dev.dhyey.cabrouter.routing.TravelModel;
+import dev.dhyey.cabrouter.routing.VehicleType;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -75,9 +79,8 @@ public class PlanningService {
             requireSameOffice(e, office);
         }
 
-        int capacity = req.cabCapacity() != null ? req.cabCapacity() : props.defaultCabCapacity();
         int maxRide = req.maxRideMinutes() != null ? req.maxRideMinutes() : props.defaultMaxRideMinutes();
-        RoutePlan plan = new RoutePlan(office, req.shiftTime(), req.direction(), capacity, maxRide);
+        RoutePlan plan = new RoutePlan(office, req.shiftTime(), req.direction(), fleetOf(req), maxRide);
 
         List<Stop> stops = req.employeeIds().stream().map(id -> toStop(staff.get(id))).toList();
         rebuildAll(plan, stops);
@@ -106,7 +109,8 @@ public class PlanningService {
             if (remaining.isEmpty()) {
                 plan.getCabs().remove(cab);
             } else {
-                write(plan, cab, planner.buildCab(plan.getOffice().location(), remaining, params(plan)));
+                // The cab keeps its vehicle even if a smaller one would now do: it is already dispatched.
+                write(plan, cab, planner.buildCab(plan.getOffice().location(), cab.vehicle(), remaining, params(plan)));
             }
         }
         plan.touch();
@@ -155,7 +159,7 @@ public class PlanningService {
         List<StopTiming> timings = EtaCalculator.compute(travel, plan.getOffice().location(), planned.stops(),
                 plan.getDirection(), officeTime, props.dwellMinutes());
 
-        cab.update(planned.distanceKm(), planned.maxRideMinutes(), planned.escortRequired(), officeTime);
+        cab.update(planned.vehicle(), planned.distanceKm(), planned.maxRideMinutes(), planned.escortRequired(), officeTime);
         cab.getStops().clear();
         int sequence = 1;
         for (StopTiming t : timings) {
@@ -170,7 +174,7 @@ public class PlanningService {
         if (plan.getDirection() == Direction.PICKUP) {
             Collections.reverse(outward);
         }
-        return new PlannedCab(outward, cab.getDistanceKm(), cab.getMaxRideMinutes(), cab.isEscortRequired());
+        return new PlannedCab(cab.vehicle(), outward, cab.getDistanceKm(), cab.getMaxRideMinutes(), cab.isEscortRequired());
     }
 
     private List<Stop> stopsOf(CabRoute cab) {
@@ -181,12 +185,29 @@ public class PlanningService {
 
     private RoutingParams params(RoutePlan plan) {
         return new RoutingParams(
-                plan.getCabCapacity(),
+                plan.fleet(),
                 plan.getMaxRideMinutes(),
                 props.dwellMinutes(),
-                props.isNight(plan.getShiftTime().toLocalTime()),
+                new ShiftContext(plan.getDirection(), officeTime(plan), props.nightStartHour(), props.nightEndHour()),
                 props.escortDetourTolerance(),
                 props.sweepStarts());
+    }
+
+    private Fleet fleetOf(CreatePlanRequest req) {
+        if (req.fleet() != null && req.cabCapacity() != null) {
+            throw new InvalidRequestException("give either cabCapacity or fleet, not both");
+        }
+        if (req.fleet() == null || req.fleet().isEmpty()) {
+            int seats = req.cabCapacity() != null ? req.cabCapacity() : props.defaultCabCapacity();
+            return Fleet.unlimited("CAB", seats);
+        }
+        try {
+            return new Fleet(req.fleet().stream()
+                    .map(v -> new Fleet.Entry(new VehicleType(v.name(), v.seats()), v.available()))
+                    .toList());
+        } catch (IllegalArgumentException e) {
+            throw new InvalidRequestException(e.getMessage());
+        }
     }
 
     private LocalDateTime officeTime(RoutePlan plan) {

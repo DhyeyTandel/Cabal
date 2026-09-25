@@ -5,9 +5,9 @@ shift time and a cab size. It decides who rides together, the order the cab coll
 them in, and when each person should be at their gate. When someone cancels or books
 late, it repairs the plan without reshuffling everyone else.
 
-Under the hood this is a **capacitated vehicle routing problem with a ride-time limit**:
-one depot (the office), many stops, a fixed seat count per cab, and a cap on how long
-any one person spends in the car. That problem is NP-hard, so the service uses a
+Under the hood this is a **heterogeneous-fleet capacitated vehicle routing problem with
+a ride-time limit**: one depot (the office), many stops, a limited mix of vehicle sizes,
+and a cap on how long any one person spends in the car. That problem is NP-hard, so the service uses a
 pipeline of classic heuristics and measures how close they get to optimal.
 
 Stack: Java 17, Spring Boot 4, Spring Data JPA (Hibernate 7), PostgreSQL 16, Flyway,
@@ -39,36 +39,62 @@ no database:
 | `POST` | `/api/offices` | Create an office (the depot) |
 | `POST` | `/api/employees` | Register an employee with home coordinates and gender |
 | `GET` | `/api/offices/{id}/employees` | List an office's employees |
-| `POST` | `/api/plans` | Plan a shift: `officeId`, `shiftTime`, `direction` (`PICKUP`/`DROP`), `employeeIds`, optional `cabCapacity`, `maxRideMinutes` |
+| `POST` | `/api/plans` | Plan a shift: `officeId`, `shiftTime`, `direction` (`PICKUP`/`DROP`), `employeeIds`, and optionally `fleet` (or the shorthand `cabCapacity`) and `maxRideMinutes` |
 | `GET` | `/api/plans/{id}` | Fetch a plan |
 | `DELETE` | `/api/plans/{id}/employees/{empId}?strategy=LOCAL\|FULL` | Cancellation |
 | `POST` | `/api/plans/{id}/employees/{empId}` | Late booking |
 | `POST` | `/api/plans/{id}/replan` | Re-optimise the whole plan from scratch |
 
-Errors come back as RFC 9457 problem details: 400 for bad input, 404 for unknown IDs,
-and 409 for a duplicate booking or a concurrent edit.
+A fleet lists vehicle types. Omit `available` for as many as needed:
 
-A plan response lists each cab's stops in driving order, with ETAs:
+```json
+{
+  "officeId": 1,
+  "shiftTime": "2026-10-01T22:00:00",
+  "direction": "DROP",
+  "employeeIds": [1, 2, 3, 4, 5, 6, 7, 8],
+  "fleet": [
+    { "name": "SEDAN", "seats": 4 },
+    { "name": "SUV", "seats": 6, "available": 2 }
+  ]
+}
+```
+
+`cabCapacity: 4` is shorthand for an unlimited fleet of 4-seat cabs. Giving neither
+uses `routing.default-cab-capacity`.
+
+Errors come back as RFC 9457 problem details:
+
+| Status | When |
+|---|---|
+| 400 | Bad input |
+| 404 | Unknown ID |
+| 409 | Duplicate booking, or a concurrent edit |
+| 422 | The fleet is too small to seat everyone within the ride limit |
+
+A plan response lists each cab's vehicle and its stops in driving order, with ETAs:
 
 ```text
-cab 7 [3 seats, 12.22 km, longest ride 37.34 min]: Ravi 20:06 -> Suresh 20:26 -> Anjali 20:39 -> office 20:45
+cab 2 SEDAN [2/4 seats, 32.17 km, longest ride 89.73 min, ESCORT]: office 22:10 -> Aditya 23:08 -> Lakshmi 23:40
 ```
 
 ## The heuristic
 
 ```
-employees ──► sweep clustering ──► per-cab sequencing ──► escort rule ──► inter-route search ──► ETAs
-              (who rides together)  (NN, 2-opt, Or-opt)   (night safety)  (relocate / swap)
+employees ─► sweep clustering ─► per-cab sequencing ─► escort rule ─► inter-route search ─► right-size vehicles ─► ETAs
+            (who rides together) (NN, 2-opt, Or-opt)  (night safety) (relocate / swap)
 ```
 
 ### 1. Clustering: sweep (`SweepClusterer`)
 
 Sort employees by their polar angle around the office, then walk round the circle
-filling cabs. A cab closes when it is full, or when adding the next person would push
-the longest ride over `maxRideMinutes`. The result depends on where the sweep starts,
-so it tries up to 48 start angles in both directions. The winner uses the **fewest
-cabs**, then the **fewest kilometres**, because a vehicle costs far more than a few
-extra km.
+filling cabs. A cab may grow to the largest vehicle still free in the fleet. It closes
+when it is full, or when adding the next person would push the longest ride over
+`maxRideMinutes`, and then takes the smallest free vehicle that seats its riders. The
+result depends on where the sweep starts, so it tries up to 48 start angles in both
+directions. The winner uses the **fewest vehicles**, then the **fewest kilometres**,
+because a vehicle costs far more than a few extra km. If no start angle seats everyone
+in the fleet, the API returns 422 rather than overfilling a cab.
 
 Sweep suits this problem because every route shares one depot, and people in the same
 direction from the office really do tend to share a road.
@@ -91,10 +117,17 @@ direction and the ETA step reverses it for pickups.
 
 ### 3. Night escort rule (`RoutePlanner.buildCab`)
 
-Several Indian states require that on night shifts a woman is never the first person
-picked up or the last dropped, because she would be alone with the driver. In the
-outward frame, both cases are the same position: the last stop. If a woman lands
-there, the planner tries ending the route at each other rider instead. It accepts the
+Several Indian states require that at night a woman is never the first person picked
+up or the last dropped, because she would be alone with the driver. In the outward
+frame, both cases are the same position: the last stop.
+
+"Night" is judged per cab by the time it is actually at that stop (20:00 to 07:00 by
+default), not by the shift time. A 07:30 shift is a day shift, but in the demo its
+Electronic City pickup is at 05:43, in the dark. `ShiftContext` computes that time
+with the same arithmetic as the ETAs.
+
+If a woman lands in that position at night, the planner tries ending the route at each
+other rider instead. It accepts the
 cheapest reorder that adds at most 25% distance and does not break the ride limit.
 If none qualifies, the cab is flagged `escortRequired` so operations can assign a guard.
 
@@ -111,9 +144,18 @@ nearest cabs:
 - **swap**: exchange two riders between cabs.
 
 A move is kept only if total km drops, every cab stays within the ride limit, and no
-new escort flag appears.
+new escort flag appears. Cabs keep their vehicle during the search, so a relocate only
+targets a cab with a free seat.
 
-### 5. ETAs (`EtaCalculator`)
+### 5. Right-sizing vehicles (`RoutePlanner.rightSize`)
+
+Moves change cab sizes, so vehicles are reassigned at the end. Cabs are served
+fullest first, each taking the smallest vehicle still free that seats its riders.
+Every vehicle that fits the fullest cab also fits every emptier one, so taking the
+smallest fit never blocks a later cab. That makes this greedy pass exact: if any valid
+assignment exists, it finds one.
+
+### 6. ETAs (`EtaCalculator`)
 
 - **Pickup** works backwards from `shiftTime - 15 min`.
 - **Drop** works forwards from `shiftTime + 10 min`.
@@ -127,11 +169,13 @@ stop between you and the office.
 |---|---|---|
 | Cancellation | Re-sequence only the affected cab; drop it if empty | Re-cluster everyone who is left |
 | Other drivers | Untouched, same cab number and same stops | May change |
+| Vehicles | The affected cab keeps its vehicle (it is already dispatched) | Re-assigned and right-sized |
 | Distance | Can drift from optimal over many edits | Best the heuristic can do |
 
 Late bookings use **cheapest insertion**: try the rider in every cab with a free seat,
-keep the one whose route grows least within the ride limit, and open a new cab only if
-none fits. `POST /replan` exists for when enough local edits have piled up that a
+keep the one whose route grows least within the ride limit, and open a new cab in the
+smallest free vehicle only if none fits. If the fleet has nothing left, the API returns
+422. `POST /replan` exists for when enough local edits have piled up that a
 reshuffle is worth the disruption.
 
 In practice, stability matters more than a few kilometres once drivers and riders have
@@ -147,7 +191,8 @@ From the test suite (fixed seeds, so these numbers are reproducible):
 | Per-cab sequencing vs **brute-force optimum**, 500 random cabs of 2 to 7 stops | 2-opt alone: 412/500 optimal, mean gap 0.84%, worst 23.3% |
 | Same, with Or-opt added | **471/500 optimal, mean gap 0.19%, worst 12.6%** |
 | Inter-route pass vs sweep alone, 20 instances of 60 riders | 3.6% less total distance, never more cabs |
-| Demo shift (23 riders, Bengaluru) | 136.5 km to 128.2 km with the same 7 cabs |
+| Demo shift (23 riders, Bengaluru), 4-seat cabs only | 136.5 km to 128.2 km with the same 7 cabs |
+| Same riders, sedans plus 2 six-seat SUVs | 6 vehicles instead of 7 |
 
 The brute-force comparison is what gives the heuristic claims weight: the test would
 fail if the sequencer ever reported a route shorter than the true optimum (an
@@ -166,31 +211,37 @@ These are honest gaps, roughly in the order I would fix them:
 2. **No global optimality guarantee.** Sweep plus local search finds good plans, not
    optimal ones. For large shifts, a metaheuristic (simulated annealing, or ALNS as used
    in production VRP solvers) or a solver like OR-Tools would do better.
-3. **Homogeneous fleet.** Every cab has the same capacity. Real fleets mix 4-seat
-   sedans and 6-seat SUVs at different costs.
-4. **Night is judged by shift time.** A 07:30 shift is "day", but its first pickup may
-   be at 06:15 in the dark. The rule should check each cab's actual first pickup or
-   last drop time.
-5. **No time windows or vehicle availability.** Employees cannot say "not before
-   07:00". Cabs are assumed unlimited and to start at the first stop, with no
-   depot-to-first-stop deadhead.
-6. **Local repair drifts.** Many cancellations in a row leave half-empty cabs. Nothing
-   yet suggests "merge cabs 4 and 7" automatically.
+3. **Vehicles are counted, not costed.** The objective is fewest vehicles, then fewest
+   km. It does not know that an SUV costs more per km than a sedan, so it can pick one
+   SUV where two sedans would be cheaper. A per-type fixed and per-km cost would fix it.
+4. **Late bookings never upgrade a vehicle.** If every sedan is full but an SUV is
+   free, insertion opens a new cab instead of swapping a full sedan for the SUV.
+5. **No time windows or depot deadhead.** Employees cannot say "not before 07:00".
+   Cabs are assumed to start at their first stop, with no drive from the vendor's yard.
+6. **Local repair drifts.** Many cancellations in a row leave half-empty cabs, still in
+   their original vehicles. Nothing yet suggests "merge cabs 4 and 7" automatically.
 7. **Performance is untested beyond a few hundred riders.** The sweep is roughly
    O(starts × n × c²) and the inter-route pass roughly O(cabs × 6 × c²) per pass,
    where c is cab size. Fine for a shift, but not benchmarked at city scale.
+
+Fixed since the first version: plans now use a mixed, limited fleet, and the escort
+rule checks each cab's actual first-pickup or last-drop time instead of the shift time.
 
 ## Code layout
 
 ```
 routing/   the algorithm: plain Java, no Spring, unit-tested in isolation
   SweepClusterer, StopSequencer, InterRouteImprover, RoutePlanner, EtaCalculator,
-  TravelModel (+ HaversineTravelModel), RouteMetrics, value records
-domain/    JPA entities (Office, Employee, RoutePlan, CabRoute, RouteStop) and repositories
+  Fleet, FleetInventory, ShiftContext, TravelModel (+ HaversineTravelModel),
+  RouteMetrics, value records
+domain/    JPA entities (Office, Employee, RoutePlan + PlanVehicleType, CabRoute,
+           RouteStop) and repositories
 service/   PlanningService (entities to routing and back), DirectoryService
 api/       REST controllers, request/response records, problem-detail error mapping
 config/    RoutingProperties (all tunables in application.properties)
-db/migration/V1__init.sql   schema, owned by Flyway; Hibernate only validates it
+db/migration/   schema, owned by Flyway; Hibernate only validates it
+  V1__init.sql          initial schema
+  V2__mixed_fleet.sql   adds fleets and migrates existing plans in place
 ```
 
 Other design choices worth knowing:

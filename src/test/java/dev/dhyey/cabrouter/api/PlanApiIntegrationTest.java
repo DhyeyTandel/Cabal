@@ -123,6 +123,38 @@ class PlanApiIntegrationTest {
     }
 
     @Test
+    void mixedFleetIsRightSizedAndAnUndersizedFleetIsRejected() throws Exception {
+        List<Long> northAndSouth = employeeIds.subList(0, 8);
+        mvc.perform(post("/api/plans").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"officeId": %d, "shiftTime": "2026-10-01T09:00:00", "direction": "PICKUP",
+                                 "employeeIds": %s,
+                                 "fleet": [{"name": "SEDAN", "seats": 4}, {"name": "SUV", "seats": 6, "available": 1}]}"""
+                                .formatted(officeId, northAndSouth)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.cabCount").value(2))
+                .andExpect(jsonPath("$.cabs[*].vehicleType").value(org.hamcrest.Matchers.everyItem(
+                        org.hamcrest.Matchers.is("SEDAN"))))
+                .andExpect(jsonPath("$.fleet[0].name").value("SEDAN"))
+                .andExpect(jsonPath("$.fleet[0].used").value(2))
+                .andExpect(jsonPath("$.fleet[1].used").value(0));
+
+        mvc.perform(post("/api/plans").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"officeId": %d, "shiftTime": "2026-10-01T09:00:00", "direction": "PICKUP",
+                                 "employeeIds": %s, "fleet": [{"name": "SEDAN", "seats": 4, "available": 1}]}"""
+                                .formatted(officeId, northAndSouth)))
+                .andExpect(status().is(422));
+
+        mvc.perform(post("/api/plans").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"officeId": %d, "shiftTime": "2026-10-01T09:00:00", "direction": "PICKUP",
+                                 "employeeIds": %s, "cabCapacity": 4, "fleet": [{"name": "SEDAN", "seats": 4}]}"""
+                                .formatted(officeId, northAndSouth)))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void errorsComeBackAsProblemDetails() throws Exception {
         mvc.perform(get("/api/plans/999999"))
                 .andExpect(status().isNotFound())

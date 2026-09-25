@@ -10,6 +10,8 @@ import java.util.List;
  * <p>Picture a ray from the office rotating like a clock hand. We sort employees by
  * their polar angle and fill cabs in that order. A cab is closed when it runs out of
  * seats, or when adding the next employee would push someone past the ride-time limit.
+ * Each cab may grow to the largest vehicle still free in the fleet; when it closes, it
+ * takes the smallest free vehicle that seats its riders.
  *
  * <p>A single sweep depends heavily on where the ray starts, so we try several start
  * angles in both rotational directions. The winner uses the fewest cabs, then the
@@ -25,7 +27,10 @@ public final class SweepClusterer {
         this.sequencer = sequencer;
     }
 
-    /** @return clusters, each already sequenced outward from the office */
+    /**
+     * @return clusters, each already sequenced outward from the office
+     * @throws FleetExhaustedException if no sweep fits everyone into the fleet
+     */
     public List<List<Stop>> cluster(GeoPoint office, List<Stop> stops, RoutingParams params) {
         if (stops.isEmpty()) {
             return List.of();
@@ -41,16 +46,23 @@ public final class SweepClusterer {
             for (int s = 0; s < starts; s++) {
                 int start = (int) ((long) s * n / starts);
                 Solution candidate = sweep(office, byAngle, start, step, params);
-                if (best == null || candidate.isBetterThan(best)) {
+                if (candidate != null && (best == null || candidate.isBetterThan(best))) {
                     best = candidate;
                 }
             }
         }
+        if (best == null) {
+            throw new FleetExhaustedException("the fleet cannot carry " + n
+                    + " employees within the ride limit; add vehicles or relax maxRideMinutes");
+        }
         return best.clusters();
     }
 
+    /** @return the solution, or null if the fleet ran out before everyone was seated */
     private Solution sweep(GeoPoint office, List<Stop> byAngle, int start, int step, RoutingParams params) {
         int n = byAngle.size();
+        FleetInventory fleet = params.fleet().inventory();
+        int seats = fleet.maxAvailableSeats();
         List<List<Stop>> clusters = new ArrayList<>();
         double totalKm = 0;
         List<Stop> current = new ArrayList<>();
@@ -59,7 +71,7 @@ public final class SweepClusterer {
         for (int i = 0; i < n; i++) {
             Stop next = byAngle.get(Math.floorMod(start + step * i, n));
             if (!current.isEmpty()) {
-                if (current.size() < params.cabCapacity()) {
+                if (current.size() < seats) {
                     List<Stop> candidate = new ArrayList<>(current);
                     candidate.add(next);
                     List<Stop> route = sequencer.sequence(office, candidate);
@@ -72,7 +84,12 @@ public final class SweepClusterer {
                 }
                 clusters.add(currentRoute);
                 totalKm += RouteMetrics.pathKm(travel, office, currentRoute);
+                fleet.take(fleet.smallestFitting(current.size()).orElseThrow());
+                seats = fleet.maxAvailableSeats();
                 current = new ArrayList<>();
+            }
+            if (seats == 0) {
+                return null;
             }
             // A lone employee always gets a cab, even if the trip alone breaks the limit.
             current.add(next);

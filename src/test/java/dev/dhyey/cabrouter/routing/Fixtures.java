@@ -1,5 +1,6 @@
 package dev.dhyey.cabrouter.routing;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
@@ -37,7 +38,21 @@ final class Fixtures {
         return stops;
     }
 
+    /** A 09:00 pickup; every stop in these tests is reached well after dawn. */
+    static final ShiftContext DAY = new ShiftContext(Direction.PICKUP, LocalDateTime.of(2026, 10, 1, 9, 0), 20, 7);
+
+    /** A 23:00 drop; every stop is reached at night. */
+    static final ShiftContext NIGHT = new ShiftContext(Direction.DROP, LocalDateTime.of(2026, 10, 1, 23, 0), 20, 7);
+
+    static VehicleType cab(int seats) {
+        return new VehicleType("CAB", seats);
+    }
+
     static RoutingParams params(int capacity, double maxRide) {
-        return new RoutingParams(capacity, maxRide, 2, false, 0.25, 48);
+        return params(Fleet.unlimited("CAB", capacity), maxRide);
+    }
+
+    static RoutingParams params(Fleet fleet, double maxRide) {
+        return new RoutingParams(fleet, maxRide, 2, DAY, 0.25, 48);
     }
 }

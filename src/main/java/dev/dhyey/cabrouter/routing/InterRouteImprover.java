@@ -12,7 +12,8 @@ import java.util.function.BiFunction;
  *
  * <ul>
  *   <li><b>Relocate</b>: move one employee into another cab with a free seat. If that
- *       empties the source cab, the plan needs one cab fewer.</li>
+ *       empties the source cab, the plan needs one cab fewer. Cabs keep their vehicle
+ *       during the search; the planner right-sizes vehicles afterwards.</li>
  *   <li><b>Swap</b>: exchange two employees between cabs.</li>
  * </ul>
  *
@@ -28,9 +29,10 @@ final class InterRouteImprover {
     private static final int MAX_PASSES = 50;
 
     private final TravelModel travel;
-    private final BiFunction<List<Stop>, RoutingParams, PlannedCab> buildCab;
+    /** Rebuilds a cab, keeping its vehicle, with a new set of riders. */
+    private final BiFunction<PlannedCab, List<Stop>, PlannedCab> buildCab;
 
-    InterRouteImprover(TravelModel travel, BiFunction<List<Stop>, RoutingParams, PlannedCab> buildCab) {
+    InterRouteImprover(TravelModel travel, BiFunction<PlannedCab, List<Stop>, PlannedCab> buildCab) {
         this.travel = travel;
         this.buildCab = buildCab;
     }
@@ -63,13 +65,13 @@ final class InterRouteImprover {
     private boolean tryRelocate(List<PlannedCab> cabs, int from, int to, RoutingParams params) {
         PlannedCab src = cabs.get(from);
         PlannedCab dst = cabs.get(to);
-        if (dst.stops().size() >= params.cabCapacity()) {
+        if (!dst.hasFreeSeat()) {
             return false;
         }
         for (Stop s : src.stops()) {
             List<Stop> srcRest = without(src.stops(), s);
-            PlannedCab newSrc = srcRest.isEmpty() ? null : buildCab.apply(srcRest, params);
-            PlannedCab newDst = buildCab.apply(with(dst.stops(), s), params);
+            PlannedCab newSrc = srcRest.isEmpty() ? null : buildCab.apply(src, srcRest);
+            PlannedCab newDst = buildCab.apply(dst, with(dst.stops(), s));
             if (accept(src, dst, newSrc, newDst, params)) {
                 cabs.set(to, newDst);
                 if (newSrc == null) {
@@ -88,8 +90,8 @@ final class InterRouteImprover {
         PlannedCab cb = cabs.get(b);
         for (Stop s : ca.stops()) {
             for (Stop t : cb.stops()) {
-                PlannedCab na = buildCab.apply(with(without(ca.stops(), s), t), params);
-                PlannedCab nb = buildCab.apply(with(without(cb.stops(), t), s), params);
+                PlannedCab na = buildCab.apply(ca, with(without(ca.stops(), s), t));
+                PlannedCab nb = buildCab.apply(cb, with(without(cb.stops(), t), s));
                 if (accept(ca, cb, na, nb, params)) {
                     cabs.set(a, na);
                     cabs.set(b, nb);

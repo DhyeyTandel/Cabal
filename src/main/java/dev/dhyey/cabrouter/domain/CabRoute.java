@@ -1,5 +1,6 @@
 package dev.dhyey.cabrouter.domain;
 
+import dev.dhyey.cabrouter.routing.VehicleType;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -28,6 +29,8 @@ public class CabRoute {
     private RoutePlan plan;
 
     private int cabNumber;
+    private String vehicleType;
+    private int seats;
     private double distanceKm;
     private double maxRideMinutes;
     private boolean escortRequired;
@@ -48,7 +51,10 @@ public class CabRoute {
         this.cabNumber = cabNumber;
     }
 
-    public void update(double distanceKm, double maxRideMinutes, boolean escortRequired, LocalDateTime officeTime) {
+    public void update(VehicleType vehicle, double distanceKm, double maxRideMinutes, boolean escortRequired,
+                       LocalDateTime officeTime) {
+        this.vehicleType = vehicle.name();
+        this.seats = vehicle.seats();
         this.distanceKm = distanceKm;
         this.maxRideMinutes = maxRideMinutes;
         this.escortRequired = escortRequired;
@@ -65,6 +71,10 @@ public class CabRoute {
 
     public int getCabNumber() {
         return cabNumber;
+    }
+
+    public VehicleType vehicle() {
+        return new VehicleType(vehicleType, seats);
     }
 
     public double getDistanceKm() {

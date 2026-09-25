@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Written for the bash 3.2 that ships with macOS (no negative indices; JSON built with jq).
-# Seeds one office and 24 employees across Bengaluru, then plans a morning pickup,
-# cancels one rider, and adds a late booking. Requires the app on :8080 and jq.
+# Seeds one office and 24 employees across Bengaluru, plans a late-night drop with a
+# mixed fleet, cancels one rider, adds a late booking, then plans an early pickup. Requires the app on :8080 and jq.
 set -euo pipefail
 API=${API:-http://localhost:8080/api}
 
@@ -47,13 +47,17 @@ done
 late=${ids[23]}
 roster=$(printf '%s\n' "${ids[@]:0:23}" | jq -s -c .)
 
-summary='"plan \(.id) rev \(.revision): \(.cabCount) cabs, \(.employeeCount) riders, \(.totalDistanceKm) km",
-  (.cabs[] | "  cab \(.cabNumber) [\(.seatsUsed) seats, \(.distanceKm) km, longest ride \(.maxRideMinutes) min\(if .escortRequired then ", ESCORT" else "" end)]: " +
-     ([.stops[] | "\(.employeeName) \(.eta[11:16])"] | join(" -> ")) + " -> office \(.officeTime[11:16])")'
+summary='.direction as $d | "plan \(.id) rev \(.revision): \(.cabCount) cabs, \(.employeeCount) riders, \(.totalDistanceKm) km",
+  (.cabs[] | "  cab \(.cabNumber) \(.vehicleType) [\(.seatsUsed)/\(.seats) seats, \(.distanceKm) km, longest ride \(.maxRideMinutes) min\(if .escortRequired then ", ESCORT" else "" end)]: " +
+     (if $d == "DROP" then "office \(.officeTime[11:16]) -> " else "" end) +
+     ([.stops[] | "\(.employeeName) \(.eta[11:16])"] | join(" -> ")) +
+     (if $d == "PICKUP" then " -> office \(.officeTime[11:16])" else "" end))'
 
-echo; echo "== 21:00 night-shift pickup, 4-seat cabs =="
-body=$(jq -nc --argjson o "$office" --argjson r "$roster" \
-  '{officeId: $o, shiftTime: "2026-10-01T21:00:00", direction: "PICKUP", employeeIds: $r, cabCapacity: 4}')
+fleet='[{"name":"SEDAN","seats":4},{"name":"SUV","seats":6,"available":2}]'
+
+echo; echo "== 22:00 shift-end drop: unlimited sedans, 2 SUVs =="
+body=$(jq -nc --argjson o "$office" --argjson r "$roster" --argjson f "$fleet" \
+  '{officeId: $o, shiftTime: "2026-10-01T22:00:00", direction: "DROP", employeeIds: $r, fleet: $f}')
 plan=$(post /plans "$body")
 echo "$plan" | jq -r "$summary"
 pid=$(echo "$plan" | jq .id)
@@ -63,3 +67,8 @@ curl -sf -X DELETE "$API/plans/$pid/employees/${ids[1]}" | jq -r "$summary"
 
 echo; echo "== late booking: ${homes[23]%% *} =="
 post "/plans/$pid/employees/$late" | jq -r "$summary"
+
+echo; echo "== 07:30 pickup: a day shift, but cabs whose first pickup is before 07:00 still get the escort rule =="
+body=$(jq -nc --argjson o "$office" --argjson r "$roster" --argjson f "$fleet" \
+  '{officeId: $o, shiftTime: "2026-10-01T07:30:00", direction: "PICKUP", employeeIds: $r, fleet: $f}')
+post /plans "$body" | jq -r "$summary"
