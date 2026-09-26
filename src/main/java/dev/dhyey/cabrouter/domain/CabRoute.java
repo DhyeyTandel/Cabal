@@ -38,6 +38,9 @@ public class CabRoute {
     private double maxRideMinutes;
     private boolean escortRequired;
 
+    /** What this cab costs to run, fixed when it was routed. */
+    private double cost;
+
     @Enumerated(EnumType.STRING)
     private TravelSource travelSource;
 
@@ -58,7 +61,8 @@ public class CabRoute {
     }
 
     public void update(VehicleType vehicle, double distanceKm, double maxRideMinutes, boolean escortRequired,
-                       LocalDateTime officeTime, TravelSource travelSource) {
+                       double cost, LocalDateTime officeTime, TravelSource travelSource) {
+        this.cost = cost;
         this.travelSource = travelSource;
         this.vehicleType = vehicle.name();
         this.seats = vehicle.seats();
@@ -80,8 +84,16 @@ public class CabRoute {
         return cabNumber;
     }
 
-    public VehicleType vehicle() {
-        return new VehicleType(vehicleType, seats);
+    public String getVehicleType() {
+        return vehicleType;
+    }
+
+    public int getSeats() {
+        return seats;
+    }
+
+    public double getCost() {
+        return cost;
     }
 
     public double getDistanceKm() {

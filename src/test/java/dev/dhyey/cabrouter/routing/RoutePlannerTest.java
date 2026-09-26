@@ -113,7 +113,7 @@ class RoutePlannerTest {
     // Night escort rule
 
     private static RoutingParams night(double tolerance) {
-        return new RoutingParams(Fleet.unlimited("CAB", 4), 1_000, 2, Fixtures.NIGHT, tolerance, 48);
+        return new RoutingParams(Fleet.unlimited("CAB", 4), 1_000, 2, Fixtures.NIGHT, tolerance, 48, 0);
     }
 
     @Test
@@ -213,7 +213,7 @@ class RoutePlannerTest {
 
     private static RoutingParams pickupAt(LocalDateTime officeArrival) {
         return new RoutingParams(Fleet.unlimited("CAB", 4), 1_000, 2,
-                new ShiftContext(Direction.PICKUP, officeArrival, 20, 7), 0.25, 48);
+                new ShiftContext(Direction.PICKUP, officeArrival, 20, 7), 0.25, 48, 0);
     }
 
     // Mixed fleet

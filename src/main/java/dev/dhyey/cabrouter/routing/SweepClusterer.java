@@ -14,8 +14,10 @@ import java.util.List;
  * takes the smallest free vehicle that seats its riders.
  *
  * <p>A single sweep depends heavily on where the ray starts, so we try several start
- * angles in both rotational directions. The winner uses the fewest cabs, then the
- * fewest total kilometres, because vehicles cost more than distance.
+ * angles in both rotational directions. With a mixed fleet, filling every cab up to
+ * the biggest vehicle is not always cheapest (an SUV may cost more than the sedan
+ * trips it replaces), so the whole search also runs once per seat-size cap: "any
+ * vehicle", "nothing bigger than a sedan", and so on. The cheapest result wins.
  */
 public final class SweepClusterer {
 
@@ -42,12 +44,14 @@ public final class SweepClusterer {
         int n = byAngle.size();
         int starts = Math.min(n, params.sweepStarts());
         Solution best = null;
-        for (int step : new int[] {1, -1}) {
-            for (int s = 0; s < starts; s++) {
-                int start = (int) ((long) s * n / starts);
-                Solution candidate = sweep(office, byAngle, start, step, params);
-                if (candidate != null && (best == null || candidate.isBetterThan(best))) {
-                    best = candidate;
+        for (int seatCap : params.fleet().seatSizes()) {
+            for (int step : new int[] {1, -1}) {
+                for (int s = 0; s < starts; s++) {
+                    int start = (int) ((long) s * n / starts);
+                    Solution candidate = sweep(office, byAngle, start, step, seatCap, params);
+                    if (candidate != null && (best == null || candidate.isBetterThan(best))) {
+                        best = candidate;
+                    }
                 }
             }
         }
@@ -58,13 +62,17 @@ public final class SweepClusterer {
         return best.clusters();
     }
 
-    /** @return the solution, or null if the fleet ran out before everyone was seated */
-    private Solution sweep(GeoPoint office, List<Stop> byAngle, int start, int step, RoutingParams params) {
+    /**
+     * @param seatCap only vehicles with at most this many seats may be used
+     * @return the solution, or null if the fleet ran out before everyone was seated
+     */
+    private Solution sweep(GeoPoint office, List<Stop> byAngle, int start, int step, int seatCap,
+                           RoutingParams params) {
         int n = byAngle.size();
         FleetInventory fleet = params.fleet().inventory();
-        int seats = fleet.maxAvailableSeats();
+        int seats = fleet.maxAvailableSeats(seatCap);
         List<List<Stop>> clusters = new ArrayList<>();
-        double totalKm = 0;
+        double totalCost = 0;
         List<Stop> current = new ArrayList<>();
         List<Stop> currentRoute = List.of();
 
@@ -83,9 +91,8 @@ public final class SweepClusterer {
                     }
                 }
                 clusters.add(currentRoute);
-                totalKm += RouteMetrics.pathKm(travel, office, currentRoute);
-                fleet.take(fleet.smallestFitting(current.size()).orElseThrow());
-                seats = fleet.maxAvailableSeats();
+                totalCost += close(office, currentRoute, fleet, seatCap);
+                seats = fleet.maxAvailableSeats(seatCap);
                 current = new ArrayList<>();
             }
             if (seats == 0) {
@@ -96,8 +103,19 @@ public final class SweepClusterer {
             currentRoute = List.of(next);
         }
         clusters.add(currentRoute);
-        totalKm += RouteMetrics.pathKm(travel, office, currentRoute);
-        return new Solution(clusters, totalKm);
+        totalCost += close(office, currentRoute, fleet, seatCap);
+        return new Solution(clusters, totalCost);
+    }
+
+    /** Assigns the cheapest free vehicle within the cap that seats this cluster; returns its trip cost. */
+    private double close(GeoPoint office, List<Stop> route, FleetInventory fleet, int seatCap) {
+        double km = RouteMetrics.pathKm(travel, office, route);
+        VehicleType vehicle = fleet.free().stream()
+                .filter(t -> t.seats() >= route.size() && t.seats() <= seatCap)
+                .min(Comparator.comparingDouble((VehicleType t) -> t.tripCost(km)).thenComparingInt(VehicleType::seats))
+                .orElseThrow(); // the cluster was opened only because a vehicle this size was free
+        fleet.take(vehicle);
+        return vehicle.tripCost(km);
     }
 
     /** Angle in radians, with longitude scaled so a degree east equals a degree north locally. */
@@ -107,13 +125,13 @@ public final class SweepClusterer {
         return Math.atan2(dy, dx);
     }
 
-    private record Solution(List<List<Stop>> clusters, double totalKm) {
+    private record Solution(List<List<Stop>> clusters, double totalCost) {
 
         boolean isBetterThan(Solution other) {
-            if (clusters.size() != other.clusters.size()) {
-                return clusters.size() < other.clusters.size();
+            if (Math.abs(totalCost - other.totalCost) > 1e-9) {
+                return totalCost < other.totalCost;
             }
-            return totalKm < other.totalKm - 1e-9;
+            return clusters.size() < other.clusters.size();
         }
     }
 }

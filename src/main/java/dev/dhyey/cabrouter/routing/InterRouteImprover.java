@@ -21,8 +21,9 @@ import java.util.function.BiFunction;
  *   <li><b>Swap</b>: exchange two employees between cabs.</li>
  * </ul>
  *
- * A move is accepted only if it reduces total kilometres, keeps every multi-person cab
- * within the ride limit, and does not add escort-flagged cabs. Only each cab's nearest
+ * A move is accepted only if it reduces total cost (vehicle trip and km charges, plus
+ * guards), keeps every multi-person cab within the ride limit, and does not add
+ * escort-flagged cabs. Emptying a cab saves its whole trip charge. Only each cab's nearest
  * neighbours (by centroid) are tried, which keeps a pass roughly linear in the number
  * of cabs.
  */
@@ -195,9 +196,9 @@ final class InterRouteImprover {
         if (newEscorts > oldEscorts) {
             return false;
         }
-        double before = oldA.distanceKm() + oldB.distanceKm();
-        double after = (newA == null ? 0 : newA.distanceKm()) + newB.distanceKm();
-        return after < before - EPS || (newA == null && after <= before + EPS);
+        double before = params.cost(oldA) + params.cost(oldB);
+        double after = (newA == null ? 0 : params.cost(newA)) + params.cost(newB);
+        return after < before - EPS;
     }
 
     private static boolean withinRideLimit(PlannedCab cab, RoutingParams params) {

@@ -113,7 +113,7 @@ public class PlanningService {
                 Session session = session(plan, remaining);
                 // The cab keeps its vehicle even if a smaller one would now do: it is already dispatched.
                 PlannedCab rebuilt = session.planner().buildCab(
-                        plan.getOffice().location(), cab.vehicle(), remaining, params(plan));
+                        plan.getOffice().location(), plan.vehicleNamed(cab.getVehicleType()), remaining, params(plan));
                 write(plan, cab, rebuilt, session);
             }
         }
@@ -181,6 +181,7 @@ public class PlanningService {
                 planned.stops(), plan.getDirection(), officeTime, props.dwellMinutes());
 
         cab.update(planned.vehicle(), planned.distanceKm(), planned.maxRideMinutes(), planned.escortRequired(),
+                params(plan).cost(planned),
                 officeTime, session.travel().source());
         cab.getStops().clear();
         int sequence = 1;
@@ -201,7 +202,7 @@ public class PlanningService {
             Collections.reverse(outward);
         }
         GeoPoint office = plan.getOffice().location();
-        return new PlannedCab(cab.vehicle(), outward,
+        return new PlannedCab(plan.vehicleNamed(cab.getVehicleType()), outward,
                 RouteMetrics.pathKm(session.travel().model(), office, outward),
                 RouteMetrics.maxRideMinutes(session.travel().model(), office, outward, props.dwellMinutes(),
                         plan.getDirection()),
@@ -225,7 +226,8 @@ public class PlanningService {
                 props.dwellMinutes(),
                 new ShiftContext(plan.getDirection(), officeTime(plan), props.nightStartHour(), props.nightEndHour()),
                 props.escortDetourTolerance(),
-                props.sweepStarts());
+                props.sweepStarts(),
+                props.escortCost());
     }
 
     private Fleet fleetOf(CreatePlanRequest req) {
@@ -238,7 +240,9 @@ public class PlanningService {
         }
         try {
             return new Fleet(req.fleet().stream()
-                    .map(v -> new Fleet.Entry(new VehicleType(v.name(), v.seats()), v.available()))
+                    .map(v -> new Fleet.Entry(new VehicleType(v.name(), v.seats(),
+                            v.costPerTrip() != null ? v.costPerTrip() : VehicleType.DEFAULT_COST_PER_TRIP,
+                            v.costPerKm() != null ? v.costPerKm() : VehicleType.DEFAULT_COST_PER_KM), v.available()))
                     .toList());
         } catch (IllegalArgumentException e) {
             throw new InvalidRequestException(e.getMessage());

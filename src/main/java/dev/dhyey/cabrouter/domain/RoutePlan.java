@@ -2,6 +2,7 @@ package dev.dhyey.cabrouter.domain;
 
 import dev.dhyey.cabrouter.routing.Direction;
 import dev.dhyey.cabrouter.routing.Fleet;
+import dev.dhyey.cabrouter.routing.VehicleType;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.CollectionTable;
 import jakarta.persistence.ElementCollection;
@@ -72,7 +73,7 @@ public class RoutePlan {
         this.shiftTime = shiftTime;
         this.direction = direction;
         for (Fleet.Entry e : fleet.entries()) {
-            this.fleet.add(new PlanVehicleType(e.type().name(), e.type().seats(), e.available()));
+            this.fleet.add(new PlanVehicleType(e.type(), e.available()));
         }
         this.maxRideMinutes = maxRideMinutes;
         this.revision = 1;
@@ -114,6 +115,13 @@ public class RoutePlan {
 
     public Fleet fleet() {
         return new Fleet(fleet.stream().map(PlanVehicleType::toEntry).toList());
+    }
+
+    /** The fleet's vehicle type with this name, prices included. */
+    public VehicleType vehicleNamed(String name) {
+        return fleet.stream().filter(v -> v.getName().equals(name)).findFirst()
+                .map(PlanVehicleType::type)
+                .orElseThrow(() -> new IllegalStateException("plan " + id + " has no vehicle type " + name));
     }
 
     public List<PlanVehicleType> getFleet() {

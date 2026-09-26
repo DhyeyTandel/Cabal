@@ -10,6 +10,8 @@ public class PlanVehicleType {
 
     private String name;
     private int seats;
+    private double costPerTrip;
+    private double costPerKm;
 
     /** Null means as many as needed. */
     private Integer available;
@@ -17,14 +19,20 @@ public class PlanVehicleType {
     protected PlanVehicleType() {
     }
 
-    public PlanVehicleType(String name, int seats, Integer available) {
-        this.name = name;
-        this.seats = seats;
+    public PlanVehicleType(VehicleType type, Integer available) {
+        this.name = type.name();
+        this.seats = type.seats();
+        this.costPerTrip = type.costPerTrip();
+        this.costPerKm = type.costPerKm();
         this.available = available;
     }
 
+    public VehicleType type() {
+        return new VehicleType(name, seats, costPerTrip, costPerKm);
+    }
+
     public Fleet.Entry toEntry() {
-        return new Fleet.Entry(new VehicleType(name, seats), available);
+        return new Fleet.Entry(type(), available);
     }
 
     public String getName() {
@@ -33,6 +41,14 @@ public class PlanVehicleType {
 
     public int getSeats() {
         return seats;
+    }
+
+    public double getCostPerTrip() {
+        return costPerTrip;
+    }
+
+    public double getCostPerKm() {
+        return costPerKm;
     }
 
     public Integer getAvailable() {

@@ -1,5 +1,7 @@
 package dev.dhyey.cabrouter.routing;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,23 +30,42 @@ public final class FleetInventory {
         return inv;
     }
 
-    /** Seats in the largest vehicle still free, or 0 if none are. */
-    public int maxAvailableSeats() {
+    /** Seats in the largest free vehicle with at most {@code seatCap} seats, or 0 if none. */
+    public int maxAvailableSeats(int seatCap) {
         int max = 0;
         for (Map.Entry<VehicleType, Integer> e : remaining.entrySet()) {
-            if (e.getValue() > 0) {
+            if (e.getValue() > 0 && e.getKey().seats() <= seatCap) {
                 max = Math.max(max, e.getKey().seats());
             }
         }
         return max;
     }
 
-    /** The smallest free vehicle that seats {@code riders}. Smaller cabs cost less to run. */
+    public int maxAvailableSeats() {
+        return maxAvailableSeats(Integer.MAX_VALUE);
+    }
+
+    /** The smallest free vehicle that seats {@code riders}. */
     public Optional<VehicleType> smallestFitting(int riders) {
-        return remaining.entrySet().stream()
-                .filter(e -> e.getValue() > 0 && e.getKey().seats() >= riders)
-                .map(Map.Entry::getKey)
-                .findFirst();
+        return free().stream().filter(t -> t.seats() >= riders).findFirst();
+    }
+
+    /** The free vehicle that seats {@code riders} and costs least for a trip of {@code km}; ties go to fewer seats. */
+    public Optional<VehicleType> cheapestFitting(int riders, double km) {
+        return free().stream()
+                .filter(t -> t.seats() >= riders)
+                .min(Comparator.comparingDouble((VehicleType t) -> t.tripCost(km)).thenComparingInt(VehicleType::seats));
+    }
+
+    /** Vehicle types with at least one vehicle left, smallest first. */
+    public List<VehicleType> free() {
+        List<VehicleType> out = new ArrayList<>();
+        remaining.forEach((type, left) -> {
+            if (left > 0) {
+                out.add(type);
+            }
+        });
+        return out;
     }
 
     public void take(VehicleType type) {
@@ -57,6 +78,16 @@ public final class FleetInventory {
         }
         if (left != UNLIMITED) {
             remaining.put(type, left - 1);
+        }
+    }
+
+    public void release(VehicleType type) {
+        Integer left = remaining.get(type);
+        if (left == null) {
+            throw new IllegalArgumentException("vehicle type " + type.name() + " is not in this fleet");
+        }
+        if (left != UNLIMITED) {
+            remaining.put(type, left + 1);
         }
     }
 }

@@ -9,6 +9,7 @@ package dev.dhyey.cabrouter.routing;
  * @param escortDetourTolerance extra distance (as a fraction, 0.25 = 25%) we accept to
  *                              reorder a route instead of sending a guard
  * @param sweepStarts           how many starting angles the sweep tries per direction
+ * @param escortCost            what a guard costs for one trip, in the fleet's currency
  */
 public record RoutingParams(
         Fleet fleet,
@@ -16,7 +17,8 @@ public record RoutingParams(
         double dwellMinutes,
         ShiftContext shift,
         double escortDetourTolerance,
-        int sweepStarts) {
+        int sweepStarts,
+        double escortCost) {
 
     public RoutingParams {
         if (maxRideMinutes <= 0) {
@@ -25,5 +27,13 @@ public record RoutingParams(
         if (sweepStarts < 1) {
             throw new IllegalArgumentException("sweep starts must be at least 1");
         }
+        if (escortCost < 0) {
+            throw new IllegalArgumentException("escort cost cannot be negative");
+        }
+    }
+
+    /** What running this cab costs: the vehicle's trip and km charges, plus a guard if needed. */
+    public double cost(PlannedCab cab) {
+        return cab.vehicle().tripCost(cab.distanceKm()) + (cab.escortRequired() ? escortCost : 0);
     }
 }

@@ -138,7 +138,9 @@ class PlanApiIntegrationTest {
                         org.hamcrest.Matchers.is("SEDAN"))))
                 .andExpect(jsonPath("$.fleet[0].name").value("SEDAN"))
                 .andExpect(jsonPath("$.fleet[0].used").value(2))
-                .andExpect(jsonPath("$.fleet[1].used").value(0));
+                .andExpect(jsonPath("$.fleet[1].used").value(0))
+                .andExpect(jsonPath("$.fleet[0].costPerTrip").value(1000.0))
+                .andExpect(jsonPath("$.totalCost").value(org.hamcrest.Matchers.greaterThan(2000.0)));
 
         mvc.perform(post("/api/plans").contentType(MediaType.APPLICATION_JSON)
                         .content("""

@@ -52,7 +52,8 @@ no database:
 | `POST` | `/api/plans/{id}/employees/{empId}` | Late booking |
 | `POST` | `/api/plans/{id}/replan` | Re-optimise the whole plan from scratch |
 
-A fleet lists vehicle types. Omit `available` for as many as needed:
+A fleet lists vehicle types with their prices: a fixed charge per trip and a charge
+per km, in whatever currency you use. Omit `available` for as many as needed:
 
 ```json
 {
@@ -61,14 +62,16 @@ A fleet lists vehicle types. Omit `available` for as many as needed:
   "direction": "DROP",
   "employeeIds": [1, 2, 3, 4, 5, 6, 7, 8],
   "fleet": [
-    { "name": "SEDAN", "seats": 4 },
-    { "name": "SUV", "seats": 6, "available": 2 }
+    { "name": "SEDAN", "seats": 4, "costPerTrip": 800, "costPerKm": 14 },
+    { "name": "SUV", "seats": 6, "available": 2, "costPerTrip": 1100, "costPerKm": 18 }
   ]
 }
 ```
 
 `cabCapacity: 4` is shorthand for an unlimited fleet of 4-seat cabs. Giving neither
-uses `routing.default-cab-capacity`.
+uses `routing.default-cab-capacity`. Prices default to 1000 per trip and 15 per km,
+which makes one vehicle worth about 67 km: plans then favour fewest vehicles, then
+fewest km. The response gives each cab's `cost` and the plan's `totalCost`.
 
 Errors come back as RFC 9457 problem details:
 
@@ -89,6 +92,11 @@ cab 2 SEDAN [2/4 seats, 32.17 km, longest ride 89.73 min, ESCORT]: office 22:10 
 
 ## The heuristic
 
+**What is minimised:** total cost. A cab costs its vehicle's trip charge, plus its
+per-km charge times the route length, plus `routing.escort-cost` (600 by default) if
+it needs a guard. The ride-time limit, seat counts and fleet limits are hard
+constraints; cost decides everything else.
+
 ```
 employees ─► sweep clustering ─► per-cab sequencing ─► escort rule ─► inter-route search ─► right-size vehicles ─► ETAs
             (who rides together) (NN, 2-opt, Or-opt)  (night safety) (relocate / swap)
@@ -99,11 +107,15 @@ employees ─► sweep clustering ─► per-cab sequencing ─► escort rule �
 Sort employees by their polar angle around the office, then walk round the circle
 filling cabs. A cab may grow to the largest vehicle still free in the fleet. It closes
 when it is full, or when adding the next person would push the longest ride over
-`maxRideMinutes`, and then takes the smallest free vehicle that seats its riders. The
+`maxRideMinutes`, and then takes the cheapest free vehicle that seats its riders. The
 result depends on where the sweep starts, so it tries up to 48 start angles in both
-directions. The winner uses the **fewest vehicles**, then the **fewest kilometres**,
-because a vehicle costs far more than a few extra km. If no start angle seats everyone
-in the fleet, the API returns 422 rather than overfilling a cab.
+directions.
+
+Filling every cab up to the biggest vehicle is not always cheapest: an SUV can cost
+more than the sedan trips it replaces. So the whole search also runs once per seat
+size: "any vehicle", "nothing bigger than a sedan", and so on. The **cheapest**
+result wins. If no variant seats everyone in the fleet, the API returns 422 rather
+than overfilling a cab.
 
 Sweep suits this problem because every route shares one depot, and people in the same
 direction from the office really do tend to share a road.
@@ -159,10 +171,14 @@ targets a cab with a free seat.
 ### 5. Right-sizing vehicles (`RoutePlanner.rightSize`)
 
 Moves change cab sizes, so vehicles are reassigned at the end. Cabs are served
-fullest first, each taking the smallest vehicle still free that seats its riders.
-Every vehicle that fits the fullest cab also fits every emptier one, so taking the
-smallest fit never blocks a later cab. That makes this greedy pass exact: if any valid
-assignment exists, it finds one.
+fullest first, each taking the **cheapest** free vehicle that seats its riders for
+that route's length.
+
+This never paints itself into a corner. Every vehicle that fits the fullest cab also
+fits every emptier one, so whichever of them the fullest cab takes, each later cab
+loses one option it could equally have used. If any valid assignment exists, the
+greedy pass finds one. It is not guaranteed to find the *cheapest* assignment (that is
+a min-cost matching problem), but with two or three vehicle types the gap is small.
 
 ### 6. ETAs (`EtaCalculator`)
 
@@ -231,10 +247,16 @@ against the public demo server and a stub, not a self-hosted instance.)
 | Vehicles | The affected cab keeps its vehicle (it is already dispatched) | Re-assigned and right-sized |
 | Distance | Can drift from optimal over many edits | Best the heuristic can do |
 
-Late bookings use **cheapest insertion**: try the rider in every cab with a free seat,
-keep the one whose route grows least within the ride limit, and open a new cab in the
-smallest free vehicle only if none fits. If the fleet has nothing left, the API returns
-422. `POST /replan` exists for when enough local edits have piled up that a
+Late bookings use **cheapest insertion**, by cost. Three kinds of option compete:
+
+- add the rider to a cab with a free seat;
+- **upgrade** a full cab to a bigger free vehicle and add them there;
+- send a new cab in the cheapest free vehicle.
+
+Options that break the ride limit are skipped, and one that would newly need a guard
+loses to any that would not. If nothing is feasible, the API returns 422. An upgrade
+does mean swapping a car that may already be assigned, which is why it only wins when
+it is cheaper than sending another one. `POST /replan` exists for when enough local edits have piled up that a
 reshuffle is worth the disruption.
 
 In practice, stability matters more than a few kilometres once drivers and riders have
@@ -250,6 +272,7 @@ From the test suite (fixed seeds, so these numbers are reproducible):
 | Per-cab sequencing vs **brute-force optimum**, 500 random cabs of 2 to 7 stops | 2-opt alone: 412/500 optimal, mean gap 0.84%, worst 23.3% |
 | Same, with Or-opt added | **471/500 optimal, mean gap 0.19%, worst 12.6%** |
 | Inter-route pass vs sweep alone, 20 instances of 60 riders | 3.5% less total distance, never more cabs |
+| Demo drop, 23 riders, sedans 800 + 14/km and 2 SUVs 1,100 + 18/km | 7,613 by cost, against 8,037 for the plan the earlier fewest-vehicles objective chose: **5.3% cheaper**. It uses one SUV instead of two |
 | Demo shift (23 riders, Bengaluru), 4-seat cabs only | 7 cabs, 130.8 km |
 | Same riders, sedans plus 2 six-seat SUVs | 6 vehicles instead of 7 |
 
@@ -280,13 +303,16 @@ Planning time for a full shift from scratch (sweep plus all improvement passes),
 Apple Silicon laptop, random riders within 20 km, sedans and SUVs, 90-minute ride
 limit. Reproduce with `./mvnw test -Dgroups=benchmark -DexcludedGroups=none`.
 
-| Riders | Cabs | Sweep only | Full plan, first version | Full plan, now |
-|---|---|---|---|---|
-| 100 | 17 | 55 ms | 428 ms | 133 ms |
-| 250 | 42 | 135 ms | 1.7 s | 0.42 s |
-| 500 | 84 | 273 ms | 3.9 s | 1.1 s |
-| 1,000 | 167 | 583 ms | 15.6 s | 3.7 s |
-| 2,000 | 334 | 1.1 s | 46.0 s | 12.1 s |
+| Riders | Cabs | Sweep only | Full plan, first version | Full plan, after speed-up | Full plan, with costs |
+|---|---|---|---|---|---|
+| 100 | 17 | 73 ms | 428 ms | 133 ms | 153 ms |
+| 250 | 42 | 182 ms | 1.7 s | 0.42 s | 0.48 s |
+| 500 | 84 | 366 ms | 3.9 s | 1.1 s | 1.2 s |
+| 1,000 | 167 | 743 ms | 15.6 s | 3.7 s | 4.0 s |
+| 2,000 | 334 | 1.5 s | 46.0 s | 12.1 s | 13.1 s |
+
+The cost model added about 9%, because the sweep now runs once per seat size (twice
+for sedans plus SUVs).
 
 Sweep is linear. The inter-route search dominates, and three changes made it about
 4× faster:
@@ -325,24 +351,23 @@ These are honest gaps, roughly in the order I would fix them:
 2. **No global optimality guarantee.** Sweep plus local search finds good plans, not
    optimal ones. For large shifts, a metaheuristic (simulated annealing, or ALNS as used
    in production VRP solvers) or a solver like OR-Tools would do better.
-3. **Vehicles are counted, not costed.** The objective is fewest vehicles, then fewest
-   km. It does not know that an SUV costs more per km than a sedan, so it can pick one
-   SUV where two sedans would be cheaper. A per-type fixed and per-km cost would fix it.
-4. **Late bookings never upgrade a vehicle.** If every sedan is full but an SUV is
-   free, insertion opens a new cab instead of swapping a full sedan for the SUV.
-5. **No time windows or depot deadhead.** Employees cannot say "not before 07:00".
+3. **Pricing is simple.** Real vendor contracts have minimum-km slabs, night
+   surcharges and waiting charges. The model is trip charge plus a per-km rate, and a
+   flat guard cost. Vehicle assignment is greedy, not an exact min-cost matching.
+4. **No time windows or depot deadhead.** Employees cannot say "not before 07:00".
    Cabs are assumed to start at their first stop, with no drive from the vendor's yard.
-6. **Local repair drifts.** Many cancellations in a row leave half-empty cabs, still in
+5. **Local repair drifts.** Many cancellations in a row leave half-empty cabs, still in
    their original vehicles. Nothing yet suggests "merge cabs 4 and 7" automatically.
-7. **Large shifts take seconds.** A 2,000-rider full re-plan takes about 12 s. That is
+6. **Large shifts take seconds.** A 2,000-rider full re-plan takes about 13 s. That is
    fine for planning ahead of a shift, but too slow to run on every edit, which is
    why edits use local repair. Beyond that, split by zone, or run the search under a
    time budget.
 
 Fixed since the first version: plans now use a mixed, limited fleet; the escort rule
 checks each cab's actual first-pickup or last-drop time instead of the shift time; and
-travel can be timed on the real road network through OSRM, with directed times; and
-planning is about 4× faster on large shifts, with measured numbers.
+travel can be timed on the real road network through OSRM, with directed times;
+planning is about 4× faster on large shifts; plans minimise cost with per-vehicle
+prices; and late bookings can upgrade a full cab to a bigger free vehicle.
 
 ## Code layout
 
@@ -362,6 +387,7 @@ db/migration/   schema, owned by Flyway; Hibernate only validates it
   V1__init.sql          initial schema
   V2__mixed_fleet.sql   adds fleets and migrates existing plans in place
   V3__travel_source.sql records which travel model timed each cab
+  V4__costs.sql         vehicle prices per plan and a cost per cab, backfilled
 ```
 
 Other design choices worth knowing:

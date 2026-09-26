@@ -33,9 +33,14 @@ public record Fleet(List<Entry> entries) {
         entries = entries.stream().sorted(Comparator.comparingInt(e -> e.type().seats())).toList();
     }
 
-    /** Any number of identical vehicles. This is what a plain {@code cabCapacity} means. */
+    /** Any number of identical vehicles at default prices. This is what a plain {@code cabCapacity} means. */
     public static Fleet unlimited(String name, int seats) {
         return new Fleet(List.of(new Entry(new VehicleType(name, seats), null)));
+    }
+
+    /** Distinct seat counts, smallest first. */
+    public List<Integer> seatSizes() {
+        return entries.stream().map(e -> e.type().seats()).distinct().sorted().toList();
     }
 
     public FleetInventory inventory() {

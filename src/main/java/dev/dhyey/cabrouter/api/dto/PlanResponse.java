@@ -21,10 +21,11 @@ public record PlanResponse(
         int cabCount,
         int employeeCount,
         double totalDistanceKm,
+        double totalCost,
         List<Cab> cabs) {
 
     /** @param available null when unlimited */
-    public record FleetLine(String name, int seats, Integer available, long used) {
+    public record FleetLine(String name, int seats, double costPerTrip, double costPerKm, Integer available, long used) {
     }
 
     /**
@@ -39,6 +40,7 @@ public record PlanResponse(
             double distanceKm,
             double maxRideMinutes,
             boolean escortRequired,
+            double cost,
             LocalDateTime officeTime,
             TravelSource travelSource,
             List<StopView> stops) {
@@ -58,7 +60,7 @@ public record PlanResponse(
     public static PlanResponse from(RoutePlan plan) {
         List<Cab> cabs = plan.getCabs().stream().map(PlanResponse::cab).toList();
         List<FleetLine> fleet = plan.getFleet().stream()
-                .map(v -> new FleetLine(v.getName(), v.getSeats(), v.getAvailable(),
+                .map(v -> new FleetLine(v.getName(), v.getSeats(), v.getCostPerTrip(), v.getCostPerKm(), v.getAvailable(),
                         cabs.stream().filter(c -> c.vehicleType().equals(v.getName())).count()))
                 .toList();
         return new PlanResponse(
@@ -73,13 +75,14 @@ public record PlanResponse(
                 cabs.size(),
                 cabs.stream().mapToInt(Cab::seatsUsed).sum(),
                 round(plan.getCabs().stream().mapToDouble(CabRoute::getDistanceKm).sum()),
+                round(plan.getCabs().stream().mapToDouble(CabRoute::getCost).sum()),
                 cabs);
     }
 
     private static Cab cab(CabRoute c) {
         List<StopView> stops = c.getStops().stream().map(PlanResponse::stop).toList();
-        return new Cab(c.getCabNumber(), c.vehicle().name(), c.vehicle().seats(), stops.size(), round(c.getDistanceKm()), round(c.getMaxRideMinutes()),
-                c.isEscortRequired(), c.getOfficeTime(), c.getTravelSource(), stops);
+        return new Cab(c.getCabNumber(), c.getVehicleType(), c.getSeats(), stops.size(), round(c.getDistanceKm()), round(c.getMaxRideMinutes()),
+                c.isEscortRequired(), round(c.getCost()), c.getOfficeTime(), c.getTravelSource(), stops);
     }
 
     private static StopView stop(RouteStop s) {

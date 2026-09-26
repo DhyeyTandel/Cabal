@@ -47,13 +47,14 @@ done
 late=${ids[23]}
 roster=$(printf '%s\n' "${ids[@]:0:23}" | jq -s -c .)
 
-summary='.direction as $d | "plan \(.id) rev \(.revision): \(.cabCount) cabs, \(.employeeCount) riders, \(.totalDistanceKm) km",
-  (.cabs[] | "  cab \(.cabNumber) \(.vehicleType) [\(.seatsUsed)/\(.seats) seats, \(.distanceKm) km, longest ride \(.maxRideMinutes) min\(if .escortRequired then ", ESCORT" else "" end)]: " +
+summary='.direction as $d | "plan \(.id) rev \(.revision): \(.cabCount) cabs, \(.employeeCount) riders, \(.totalDistanceKm) km, cost \(.totalCost)",
+  (.cabs[] | "  cab \(.cabNumber) \(.vehicleType) [\(.seatsUsed)/\(.seats) seats, \(.distanceKm) km, cost \(.cost), longest ride \(.maxRideMinutes) min\(if .escortRequired then ", ESCORT" else "" end)]: " +
      (if $d == "DROP" then "office \(.officeTime[11:16]) -> " else "" end) +
      ([.stops[] | "\(.employeeName) \(.eta[11:16])"] | join(" -> ")) +
      (if $d == "PICKUP" then " -> office \(.officeTime[11:16])" else "" end))'
 
-fleet='[{"name":"SEDAN","seats":4},{"name":"SUV","seats":6,"available":2}]'
+# Illustrative prices, not vendor quotes: a per-trip charge plus a per-km charge.
+fleet='[{"name":"SEDAN","seats":4,"costPerTrip":800,"costPerKm":14},{"name":"SUV","seats":6,"available":2,"costPerTrip":1100,"costPerKm":18}]'
 
 echo; echo "== 22:00 shift-end drop: unlimited sedans, 2 SUVs =="
 body=$(jq -nc --argjson o "$office" --argjson r "$roster" --argjson f "$fleet" \

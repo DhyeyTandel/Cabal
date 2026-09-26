@@ -14,6 +14,7 @@ public record RoutingProperties(
         int nightEndHour,
         double escortDetourTolerance,
         int sweepStarts,
+        double escortCost,
         int defaultCabCapacity,
         int defaultMaxRideMinutes,
         TravelModelKind travelModel,

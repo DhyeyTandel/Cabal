@@ -53,6 +53,6 @@ final class Fixtures {
     }
 
     static RoutingParams params(Fleet fleet, double maxRide) {
-        return new RoutingParams(fleet, maxRide, 2, DAY, 0.25, 48);
+        return new RoutingParams(fleet, maxRide, 2, DAY, 0.25, 48, 0);
     }
 }
