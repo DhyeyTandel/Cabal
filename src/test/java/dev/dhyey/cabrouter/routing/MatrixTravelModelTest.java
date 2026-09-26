@@ -39,10 +39,13 @@ class MatrixTravelModelTest {
     void rideTimesUseTheDirectionTheCabActuallyDrives() {
         List<Stop> outward = List.of(a, b);
 
+        java.time.LocalDateTime nine = java.time.LocalDateTime.of(2026, 10, 1, 9, 0);
         // DROP drives outbound: 10 + 10 min, plus one dwell at A.
-        assertThat(RouteMetrics.maxRideMinutes(model, OFFICE, outward, 2, Direction.DROP)).isEqualTo(22);
+        assertThat(RouteMetrics.maxRideMinutes(model, OFFICE, outward, 2,
+                new ShiftContext(Direction.DROP, nine, 20, 7))).isEqualTo(22);
         // PICKUP drives inbound, B to A to office: 4 + 4 min, plus one dwell at A.
-        assertThat(RouteMetrics.maxRideMinutes(model, OFFICE, outward, 2, Direction.PICKUP)).isEqualTo(10);
+        assertThat(RouteMetrics.maxRideMinutes(model, OFFICE, outward, 2,
+                new ShiftContext(Direction.PICKUP, nine, 20, 7))).isEqualTo(10);
     }
 
     @Test

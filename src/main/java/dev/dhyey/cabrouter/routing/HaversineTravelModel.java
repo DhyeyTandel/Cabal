@@ -2,7 +2,7 @@ package dev.dhyey.cabrouter.routing;
 
 /**
  * Great-circle distance scaled by a circuity factor (roads are not straight lines),
- * with a flat average speed. Cheap and dependency-free; a real deployment would swap
+ * at a flat free-flow speed; traffic is applied on top by {@link TrafficProfile}. Cheap and dependency-free; a real deployment would swap
  * in a road-network matrix (OSRM, Google Distance Matrix) behind {@link TravelModel}.
  */
 public final class HaversineTravelModel implements TravelModel {
@@ -10,17 +10,18 @@ public final class HaversineTravelModel implements TravelModel {
     private static final double EARTH_RADIUS_KM = 6371.0088;
 
     private final double circuityFactor;
-    private final double averageSpeedKmph;
+    private final double speedKmph;
 
-    public HaversineTravelModel(double circuityFactor, double averageSpeedKmph) {
+    /** @param speedKmph drive speed; the planner treats it as free-flow and applies traffic separately */
+    public HaversineTravelModel(double circuityFactor, double speedKmph) {
         if (circuityFactor < 1.0) {
             throw new IllegalArgumentException("circuity factor must be >= 1");
         }
-        if (averageSpeedKmph <= 0) {
+        if (speedKmph <= 0) {
             throw new IllegalArgumentException("average speed must be positive");
         }
         this.circuityFactor = circuityFactor;
-        this.averageSpeedKmph = averageSpeedKmph;
+        this.speedKmph = speedKmph;
     }
 
     @Override
@@ -40,6 +41,6 @@ public final class HaversineTravelModel implements TravelModel {
 
     @Override
     public double minutes(GeoPoint a, GeoPoint b) {
-        return distanceKm(a, b) / averageSpeedKmph * 60;
+        return distanceKm(a, b) / speedKmph * 60;
     }
 }

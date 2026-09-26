@@ -22,6 +22,7 @@ import dev.dhyey.cabrouter.routing.RoutingParams;
 import dev.dhyey.cabrouter.routing.ShiftContext;
 import dev.dhyey.cabrouter.routing.Stop;
 import dev.dhyey.cabrouter.routing.StopTiming;
+import dev.dhyey.cabrouter.routing.TrafficProfile;
 import dev.dhyey.cabrouter.routing.RouteMetrics;
 import dev.dhyey.cabrouter.travel.TravelEstimate;
 import dev.dhyey.cabrouter.travel.TravelModelProvider;
@@ -54,6 +55,7 @@ public class PlanningService {
     private final EmployeeRepository employees;
     private final RoutePlanRepository plans;
     private final TravelModelProvider travelProvider;
+    private final TrafficProfile traffic;
     private final RoutingProperties props;
 
     public PlanningService(OfficeRepository offices, EmployeeRepository employees, RoutePlanRepository plans,
@@ -62,6 +64,7 @@ public class PlanningService {
         this.employees = employees;
         this.plans = plans;
         this.travelProvider = travelProvider;
+        this.traffic = new TrafficProfile(props.trafficHourlyFactors());
         this.props = props;
     }
 
@@ -178,7 +181,7 @@ public class PlanningService {
     private void write(RoutePlan plan, CabRoute cab, PlannedCab planned, Session session) {
         LocalDateTime officeTime = officeTime(plan);
         List<StopTiming> timings = EtaCalculator.compute(session.travel().model(), plan.getOffice().location(),
-                planned.stops(), plan.getDirection(), officeTime, props.dwellMinutes());
+                planned.stops(), params(plan).shift(), props.dwellMinutes());
 
         cab.update(planned.vehicle(), planned.distanceKm(), planned.maxRideMinutes(), planned.escortRequired(),
                 params(plan).cost(planned),
@@ -205,7 +208,7 @@ public class PlanningService {
         return new PlannedCab(plan.vehicleNamed(cab.getVehicleType()), outward,
                 RouteMetrics.pathKm(session.travel().model(), office, outward),
                 RouteMetrics.maxRideMinutes(session.travel().model(), office, outward, props.dwellMinutes(),
-                        plan.getDirection()),
+                        params(plan).shift()),
                 cab.isEscortRequired());
     }
 
@@ -224,7 +227,8 @@ public class PlanningService {
                 plan.fleet(),
                 plan.getMaxRideMinutes(),
                 props.dwellMinutes(),
-                new ShiftContext(plan.getDirection(), officeTime(plan), props.nightStartHour(), props.nightEndHour()),
+                new ShiftContext(plan.getDirection(), officeTime(plan), props.nightStartHour(), props.nightEndHour(),
+                        traffic),
                 props.escortDetourTolerance(),
                 props.sweepStarts(),
                 props.escortCost());

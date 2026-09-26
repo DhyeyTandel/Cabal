@@ -24,8 +24,8 @@ class OsrmProviderTest {
         return out;
     }
 
-    private static OsrmProvider provider(String baseUrl, int maxTableSize, double durationFactor) {
-        return new OsrmProvider(new OsrmClient(baseUrl, maxTableSize, Duration.ofSeconds(2)), HAVERSINE, durationFactor);
+    private static OsrmProvider provider(String baseUrl, int maxTableSize) {
+        return new OsrmProvider(new OsrmClient(baseUrl, maxTableSize, Duration.ofSeconds(2)), HAVERSINE);
     }
 
     @Test
@@ -33,7 +33,7 @@ class OsrmProviderTest {
         try (StubOsrmServer osrm = new StubOsrmServer(6)) {
             List<GeoPoint> pts = points(11);
 
-            TravelEstimate est = provider(osrm.baseUrl(), 6, 1.0).forPoints(pts);
+            TravelEstimate est = provider(osrm.baseUrl(), 6).forPoints(pts);
 
             assertThat(est.source()).isEqualTo(TravelSource.OSRM);
             // 11 points in blocks of 3 gives 4 blocks, so 4 x 4 = 16 requests, each within the limit of 6.
@@ -52,20 +52,21 @@ class OsrmProviderTest {
     @Test
     void smallShiftsUseOneRequest() throws Exception {
         try (StubOsrmServer osrm = new StubOsrmServer(100)) {
-            provider(osrm.baseUrl(), 100, 1.0).forPoints(points(20));
+            provider(osrm.baseUrl(), 100).forPoints(points(20));
 
             assertThat(osrm.requests.get()).isEqualTo(1);
         }
     }
 
     @Test
-    void durationsAreScaledForTrafficAndHeadingNorthIsSlower() throws Exception {
+    void durationsStayFreeFlowAndKeepTheirDirection() throws Exception {
         try (StubOsrmServer osrm = new StubOsrmServer(100)) {
             List<GeoPoint> pts = points(2);
-            TravelModel m = provider(osrm.baseUrl(), 100, 2.0).forPoints(pts).model();
+            TravelModel m = provider(osrm.baseUrl(), 100).forPoints(pts).model();
 
+            // Traffic is applied later by the planner's TrafficProfile, not here.
             double northFreeFlow = StubOsrmServer.seconds(pts.get(0), pts.get(1)) / 60;
-            assertThat(m.minutes(pts.get(0), pts.get(1))).isCloseTo(northFreeFlow * 2, offset(1e-3));
+            assertThat(m.minutes(pts.get(0), pts.get(1))).isCloseTo(northFreeFlow, offset(1e-3));
             assertThat(m.minutes(pts.get(0), pts.get(1))).isGreaterThan(m.minutes(pts.get(1), pts.get(0)));
         }
     }
@@ -76,7 +77,7 @@ class OsrmProviderTest {
             List<GeoPoint> pts = points(3);
             osrm.unroutable.add(new double[] {pts.get(0).lat(), pts.get(2).lat()});
 
-            TravelEstimate est = provider(osrm.baseUrl(), 100, 1.0).forPoints(pts);
+            TravelEstimate est = provider(osrm.baseUrl(), 100).forPoints(pts);
 
             assertThat(est.source()).isEqualTo(TravelSource.OSRM);
             assertThat(est.model().minutes(pts.get(0), pts.get(2)))
@@ -87,7 +88,7 @@ class OsrmProviderTest {
     @Test
     void anUnreachableServerFallsBackToHaversineAndSaysSo() {
         // Port 9 (discard) on localhost: nothing listens, so the connection is refused.
-        TravelEstimate est = provider("http://127.0.0.1:9", 100, 1.0).forPoints(points(5));
+        TravelEstimate est = provider("http://127.0.0.1:9", 100).forPoints(points(5));
 
         assertThat(est.source()).isEqualTo(TravelSource.HAVERSINE_FALLBACK);
         assertThat(est.model()).isSameAs(HAVERSINE);

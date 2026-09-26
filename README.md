@@ -188,6 +188,27 @@ a min-cost matching problem), but with two or three vehicle types the gap is sma
 Each stop adds a 2-minute dwell. Ride time is the drive time plus the dwell at every
 stop between you and the office.
 
+### 7. Traffic by time of day (`TrafficProfile`)
+
+Travel models give **free-flow** times: empty roads. A traffic profile says how much
+slower each hour of the day is, and each leg is scaled by the factor **at the moment
+the cab drives it**. Factors are given per hour and interpolated in between, so 08:30
+sits halfway between the 08:00 and 09:00 values.
+
+Which moment? The one when the cab is at the leg's office-side end. For a drop that is
+when it sets off on the leg, stepping forwards from departure; for a pickup it is when
+it finishes the leg, stepping backwards from the required arrival. Both are already
+known at that point in the calculation, so no iteration is needed.
+
+Traffic changes timing only (ETAs, ride limits and the night check), not distance or
+cost, because vendors bill by km, not by minute. It still changes plans, because the
+ride limit binds harder at rush hour. In a test, the same 60 riders 15 km out need
+**21 cabs at 09:30 and 15 at 23:00** under a 75-minute limit.
+
+The default profile (`routing.traffic-hourly-factors`) is **illustrative, not
+measured**: the shape of a Bengaluru weekday, from 1.2 overnight to 2.5 at 09:00 and
+2.6 at 18:00. It should be calibrated from real trip logs before anyone relies on it.
+
 ### Travel times: haversine or OSRM
 
 Everything above asks one interface, `TravelModel`, for distance and drive time. There
@@ -196,7 +217,7 @@ are two implementations:
 | | `haversine` (default) | `osrm` |
 |---|---|---|
 | Distance | Straight line × 1.4 | Real road distance |
-| Time | Distance at a flat 22 km/h | OSRM free-flow time × 2.0 for traffic |
+| Time | Distance at 45 km/h free flow, then the traffic profile | OSRM free-flow time, then the traffic profile |
 | Direction | Symmetric | Directed (one-way streets, divided roads) |
 | Needs | Nothing | An OSRM server |
 
@@ -213,9 +234,10 @@ for a symmetric cost. So the optimiser minimises the **mean of both directions'
 distance**, while ride limits and ETAs use the **directed time** for the way the cab
 actually drives: towards the office for pickups, away from it for drops.
 
-**Traffic.** OSRM times assume empty roads. On the demo points, its median speed is
-46.9 km/h, which nobody drives across Bengaluru at 18:00. So times are multiplied by
-`routing.osrm.duration-factor` (2.0 by default).
+**Traffic.** OSRM times assume empty roads: on the demo points its median speed is
+46.9 km/h, which nobody drives across Bengaluru at 18:00. Both models therefore go
+through the same time-of-day traffic profile (section 7). The haversine model's 45 km/h
+free-flow speed was chosen to match OSRM's measured one.
 
 **Failure.** If OSRM is down or errors, the call falls back to haversine and marks the
 cabs `HAVERSINE_FALLBACK`. An OSRM outage makes the plan less accurate but does not
@@ -275,6 +297,13 @@ From the test suite (fixed seeds, so these numbers are reproducible):
 | Demo drop, 23 riders, sedans 800 + 14/km and 2 SUVs 1,100 + 18/km | 7,613 by cost, against 8,037 for the plan the earlier fewest-vehicles objective chose: **5.3% cheaper**. It uses one SUV instead of two |
 | Demo shift (23 riders, Bengaluru), 4-seat cabs only | 7 cabs, 130.8 km |
 | Same riders, sedans plus 2 six-seat SUVs | 6 vehicles instead of 7 |
+| Same 22:00 drop with the time-of-day traffic profile | 5 vehicles, 6,744, and no guard needed |
+
+The first four demo rows were measured with a flat all-day speed (22 km/h), before the
+traffic profile existed. With the profile, late-night roads run at about 1.4× free
+flow instead of about 2×. Longer routes then fit in the 90-minute limit, so the drop
+needs one vehicle fewer. That extra room also lets the escort rule reorder the
+Electronic City cab so its last drop is not a woman alone, instead of sending a guard.
 
 The inter-route pass is what moved the Hebbal Kempapura rider out of the southern cab.
 When it was first added, it took the demo shift from 136.5 km to 128.2 km. The figure
@@ -343,11 +372,12 @@ size. With OSRM, add one matrix request per operation.
 
 These are honest gaps, roughly in the order I would fix them:
 
-1. **No live traffic.** With OSRM, distances and road topology are real, but traffic is
-   one flat multiplier. A 07:00 pickup and a 09:30 one on the same road get the same
-   factor. Time-of-day speed profiles (OSRM supports custom segment speeds) or a
-   traffic-aware matrix API would fix this. Without OSRM, straight-line estimates can
-   be off by up to 4× for individual pairs (measured above).
+1. **Traffic is one citywide curve, and uncalibrated.** Time of day is modelled, but
+   every road gets the same factor at a given hour, and the default factors are
+   assumptions. An outer ring road and a residential lane do not congest alike.
+   Per-road speeds (OSRM supports custom segment speeds) fitted to real GPS trip logs,
+   or a traffic-aware matrix API, would fix both. Without OSRM, straight-line
+   distances can also be off by up to 4× for individual pairs (measured above).
 2. **No global optimality guarantee.** Sweep plus local search finds good plans, not
    optimal ones. For large shifts, a metaheuristic (simulated annealing, or ALNS as used
    in production VRP solvers) or a solver like OR-Tools would do better.
@@ -367,14 +397,15 @@ Fixed since the first version: plans now use a mixed, limited fleet; the escort 
 checks each cab's actual first-pickup or last-drop time instead of the shift time; and
 travel can be timed on the real road network through OSRM, with directed times;
 planning is about 4× faster on large shifts; plans minimise cost with per-vehicle
-prices; and late bookings can upgrade a full cab to a bigger free vehicle.
+prices; late bookings can upgrade a full cab to a bigger free vehicle; and each leg is
+timed with the traffic at the hour it is driven.
 
 ## Code layout
 
 ```
 routing/   the algorithm: plain Java, no Spring, unit-tested in isolation
   SweepClusterer, StopSequencer, InterRouteImprover, RoutePlanner, EtaCalculator,
-  Fleet, FleetInventory, ShiftContext, TravelModel (+ HaversineTravelModel,
+  Fleet, FleetInventory, ShiftContext, TrafficProfile, TravelModel (+ HaversineTravelModel,
   MatrixTravelModel), RouteMetrics, value records
 travel/    where travel times come from: HaversineProvider, OsrmProvider + OsrmClient
            (matrix fetching, chunking, fallback)

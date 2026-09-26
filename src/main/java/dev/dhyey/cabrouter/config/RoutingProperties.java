@@ -6,7 +6,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties("routing")
 public record RoutingProperties(
         double circuityFactor,
-        double averageSpeedKmph,
+        double freeFlowSpeedKmph,
+        double[] trafficHourlyFactors,
         double dwellMinutes,
         int arrivalBufferMinutes,
         int departureBufferMinutes,
@@ -27,10 +28,9 @@ public record RoutingProperties(
 
     /**
      * @param baseUrl        OSRM server, for example http://localhost:5000
-     * @param durationFactor multiplier on OSRM's free-flow times to allow for traffic
      * @param maxTableSize   coordinates per table request the server accepts
      * @param timeoutSeconds connect and read timeout per request
      */
-    public record Osrm(String baseUrl, double durationFactor, int maxTableSize, int timeoutSeconds) {
+    public record Osrm(String baseUrl, int maxTableSize, int timeoutSeconds) {
     }
 }

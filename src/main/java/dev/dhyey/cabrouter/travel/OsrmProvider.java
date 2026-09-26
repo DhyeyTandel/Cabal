@@ -11,15 +11,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Road-network travel from OSRM, with two corrections.
+ * Road-network travel from OSRM. Its times are free-flow (an empty city at the speed
+ * limit); the planner applies the time-of-day {@code TrafficProfile} on top, exactly as
+ * it does for haversine.
  *
- * <ul>
- *   <li><b>Traffic.</b> OSRM times are free-flow: an empty city at the speed limit. Shift
- *       changes in Bengaluru are anything but, so durations are multiplied by
- *       {@code durationFactor}.</li>
- *   <li><b>Gaps.</b> A pair OSRM cannot route is estimated by haversine and logged,
- *       rather than failing the whole plan.</li>
- * </ul>
+ * <p>A pair OSRM cannot route is estimated by haversine and logged, rather than failing
+ * the whole plan.
  *
  * If OSRM is unreachable or errors, the whole call falls back to haversine and says so
  * in its {@link TravelSource}, so a routing outage degrades accuracy, not availability.
@@ -30,15 +27,9 @@ public final class OsrmProvider implements TravelModelProvider {
 
     private final OsrmClient client;
     private final HaversineTravelModel fallback;
-    private final double durationFactor;
-
-    public OsrmProvider(OsrmClient client, HaversineTravelModel fallback, double durationFactor) {
-        if (durationFactor <= 0) {
-            throw new IllegalArgumentException("duration factor must be positive");
-        }
+    public OsrmProvider(OsrmClient client, HaversineTravelModel fallback) {
         this.client = client;
         this.fallback = fallback;
-        this.durationFactor = durationFactor;
     }
 
     @Override
@@ -69,7 +60,7 @@ public final class OsrmProvider implements TravelModelProvider {
                     minutes[i][j] = fallback.minutes(unique.get(i), unique.get(j));
                 } else {
                     km[i][j] = metres == null ? 0 : metres / 1000;
-                    minutes[i][j] = seconds == null ? 0 : seconds / 60 * durationFactor;
+                    minutes[i][j] = seconds == null ? 0 : seconds / 60;
                 }
             }
         }

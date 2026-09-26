@@ -16,12 +16,14 @@ public final class EtaCalculator {
     }
 
     /**
-     * @param officeTime PICKUP: when the cab must arrive at the office;
-     *                   DROP: when it departs the office
+     * @param shift its office time is, for PICKUP, when the cab must arrive at the office
+     *              and, for DROP, when it departs the office
      */
     public static List<StopTiming> compute(TravelModel travel, GeoPoint office, List<Stop> outward,
-                                           Direction direction, LocalDateTime officeTime, double dwellMinutes) {
-        double[] ride = RouteMetrics.rideMinutes(travel, office, outward, dwellMinutes, direction);
+                                           ShiftContext shift, double dwellMinutes) {
+        Direction direction = shift.direction();
+        LocalDateTime officeTime = shift.officeTime();
+        double[] ride = RouteMetrics.rideMinutes(travel, office, outward, dwellMinutes, shift);
         List<StopTiming> timings = new ArrayList<>(outward.size());
 
         if (direction == Direction.DROP) {

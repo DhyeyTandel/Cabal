@@ -17,7 +17,7 @@ class EtaCalculatorTest {
 
     @Test
     void pickupWorksBackwardsFromOfficeArrivalAndVisitsTheFarthestStopFirst() {
-        List<StopTiming> t = EtaCalculator.compute(TRAVEL, OFFICE, outward, Direction.PICKUP, nine, 2);
+        List<StopTiming> t = EtaCalculator.compute(TRAVEL, OFFICE, outward, new ShiftContext(Direction.PICKUP, nine, 20, 7), 2);
 
         assertThat(t).extracting(s -> s.stop().employeeId()).containsExactly(2L, 1L);
         // Stop 1: 2 min dwell + 10 min drive = 08:48.
@@ -29,7 +29,7 @@ class EtaCalculatorTest {
 
     @Test
     void dropWorksForwardsFromOfficeDepartureAndVisitsTheNearestStopFirst() {
-        List<StopTiming> t = EtaCalculator.compute(TRAVEL, OFFICE, outward, Direction.DROP, nine, 2);
+        List<StopTiming> t = EtaCalculator.compute(TRAVEL, OFFICE, outward, new ShiftContext(Direction.DROP, nine, 20, 7), 2);
 
         assertThat(t).extracting(s -> s.stop().employeeId()).containsExactly(1L, 2L);
         assertThat(t.get(0).eta()).isEqualTo(nine.plusMinutes(10));

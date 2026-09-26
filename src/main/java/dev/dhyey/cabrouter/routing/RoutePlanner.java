@@ -122,12 +122,12 @@ public final class RoutePlanner {
                 vehicle,
                 route,
                 RouteMetrics.pathKm(travel, office, route),
-                RouteMetrics.maxRideMinutes(travel, office, route, params.dwellMinutes(), params.shift().direction()),
+                RouteMetrics.maxRideMinutes(travel, office, route, params.dwellMinutes(), params.shift()),
                 escortRequired);
     }
 
     private boolean farEndAtNight(GeoPoint office, List<Stop> route, RoutingParams params) {
-        double ride = RouteMetrics.maxRideMinutes(travel, office, route, params.dwellMinutes(), params.shift().direction());
+        double ride = RouteMetrics.maxRideMinutes(travel, office, route, params.dwellMinutes(), params.shift());
         LocalDateTime when = params.shift().farEndTime(ride, params.dwellMinutes());
         return params.shift().isNight(when);
     }
@@ -135,7 +135,7 @@ public final class RoutePlanner {
     private List<Stop> escortSafeRoute(GeoPoint office, List<Stop> stops, List<Stop> unconstrained, RoutingParams params) {
         double baseKm = RouteMetrics.pathKm(travel, office, unconstrained);
         double rideLimit = Math.max(params.maxRideMinutes(),
-                RouteMetrics.maxRideMinutes(travel, office, unconstrained, params.dwellMinutes(), params.shift().direction()));
+                RouteMetrics.maxRideMinutes(travel, office, unconstrained, params.dwellMinutes(), params.shift()));
 
         List<Stop> best = null;
         double bestKm = baseKm * (1 + params.escortDetourTolerance());
@@ -149,7 +149,7 @@ public final class RoutePlanner {
             candidate.add(anchor);
 
             double km = RouteMetrics.pathKm(travel, office, candidate);
-            double ride = RouteMetrics.maxRideMinutes(travel, office, candidate, params.dwellMinutes(), params.shift().direction());
+            double ride = RouteMetrics.maxRideMinutes(travel, office, candidate, params.dwellMinutes(), params.shift());
             if (km <= bestKm + 1e-9 && ride <= rideLimit) {
                 best = candidate;
                 bestKm = km;

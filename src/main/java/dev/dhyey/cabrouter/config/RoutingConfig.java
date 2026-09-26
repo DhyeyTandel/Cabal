@@ -17,12 +17,12 @@ public class RoutingConfig {
     /** Haversine unless {@code routing.travel-model=osrm}; OSRM still uses haversine as its fallback. */
     @Bean
     TravelModelProvider travelModelProvider(RoutingProperties props) {
-        HaversineTravelModel haversine = new HaversineTravelModel(props.circuityFactor(), props.averageSpeedKmph());
+        HaversineTravelModel haversine = new HaversineTravelModel(props.circuityFactor(), props.freeFlowSpeedKmph());
         if (props.travelModel() != RoutingProperties.TravelModelKind.OSRM) {
             return new HaversineProvider(haversine);
         }
         RoutingProperties.Osrm osrm = props.osrm();
         OsrmClient client = new OsrmClient(osrm.baseUrl(), osrm.maxTableSize(), Duration.ofSeconds(osrm.timeoutSeconds()));
-        return new OsrmProvider(client, haversine, osrm.durationFactor());
+        return new OsrmProvider(client, haversine);
     }
 }
