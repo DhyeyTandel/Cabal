@@ -249,9 +249,14 @@ From the test suite (fixed seeds, so these numbers are reproducible):
 |---|---|
 | Per-cab sequencing vs **brute-force optimum**, 500 random cabs of 2 to 7 stops | 2-opt alone: 412/500 optimal, mean gap 0.84%, worst 23.3% |
 | Same, with Or-opt added | **471/500 optimal, mean gap 0.19%, worst 12.6%** |
-| Inter-route pass vs sweep alone, 20 instances of 60 riders | 3.6% less total distance, never more cabs |
-| Demo shift (23 riders, Bengaluru), 4-seat cabs only | 136.5 km to 128.2 km with the same 7 cabs |
+| Inter-route pass vs sweep alone, 20 instances of 60 riders | 3.5% less total distance, never more cabs |
+| Demo shift (23 riders, Bengaluru), 4-seat cabs only | 7 cabs, 130.8 km |
 | Same riders, sedans plus 2 six-seat SUVs | 6 vehicles instead of 7 |
+
+The inter-route pass is what moved the Hebbal Kempapura rider out of the southern cab.
+When it was first added, it took the demo shift from 136.5 km to 128.2 km. The figure
+is 130.8 km now because later changes (the time-based night rule and a reordered
+search) settle in a slightly different local optimum.
 
 **How good is the haversine model?** Checked against OSRM's real road network for all
 600 ordered pairs among the 25 demo points (office plus 24 homes):
@@ -268,6 +273,45 @@ case where OSRM changes the plan.
 The brute-force comparison is what gives the heuristic claims weight: the test would
 fail if the sequencer ever reported a route shorter than the true optimum (an
 arithmetic bug) or longer than its own starting point.
+
+## Performance
+
+Planning time for a full shift from scratch (sweep plus all improvement passes), on an
+Apple Silicon laptop, random riders within 20 km, sedans and SUVs, 90-minute ride
+limit. Reproduce with `./mvnw test -Dgroups=benchmark -DexcludedGroups=none`.
+
+| Riders | Cabs | Sweep only | Full plan, first version | Full plan, now |
+|---|---|---|---|---|
+| 100 | 17 | 55 ms | 428 ms | 133 ms |
+| 250 | 42 | 135 ms | 1.7 s | 0.42 s |
+| 500 | 84 | 273 ms | 3.9 s | 1.1 s |
+| 1,000 | 167 | 583 ms | 15.6 s | 3.7 s |
+| 2,000 | 334 | 1.1 s | 46.0 s | 12.1 s |
+
+Sweep is linear. The inter-route search dominates, and three changes made it about
+4× faster:
+
+1. **Only re-check what changed.** A cab pair is revisited only if one of the cabs
+   changed in the last pass. This alone took 1,000 riders from 15.6 s to 6.5 s.
+2. **Each pair once.** Neighbour lists are mostly mutual, so pairs were being tried in
+   both orders.
+3. **Prune hopeless moves on large shifts.** A rider is only tried in another cab if
+   they are within 1.5× the distance to its centre as to their own cab's centre.
+   Measured on 1,000 riders:
+
+   | Filter slack | Time | Saving from inter-route pass |
+   |---|---|---|
+   | off | 6.5 s | 3.6% |
+   | 2.0 | 4.7 s | 3.6% |
+   | **1.5 (chosen)** | **3.8 s** | **3.6%** |
+   | 1.0 | 2.7 s | 3.0% |
+
+   1.5 is the tightest value that keeps the full saving. Shifts of 40 cabs or fewer
+   skip the filter entirely: they plan in milliseconds regardless, and on the 23-rider
+   demo the filter cost 1.6% distance.
+
+Cancellations and late bookings do not run the full search, so they stay fast at any
+size. With OSRM, add one matrix request per operation.
 
 ## Limits
 
@@ -290,13 +334,15 @@ These are honest gaps, roughly in the order I would fix them:
    Cabs are assumed to start at their first stop, with no drive from the vendor's yard.
 6. **Local repair drifts.** Many cancellations in a row leave half-empty cabs, still in
    their original vehicles. Nothing yet suggests "merge cabs 4 and 7" automatically.
-7. **Performance is untested beyond a few hundred riders.** The sweep is roughly
-   O(starts × n × c²) and the inter-route pass roughly O(cabs × 6 × c²) per pass,
-   where c is cab size. Fine for a shift, but not benchmarked at city scale.
+7. **Large shifts take seconds.** A 2,000-rider full re-plan takes about 12 s. That is
+   fine for planning ahead of a shift, but too slow to run on every edit, which is
+   why edits use local repair. Beyond that, split by zone, or run the search under a
+   time budget.
 
 Fixed since the first version: plans now use a mixed, limited fleet; the escort rule
 checks each cab's actual first-pickup or last-drop time instead of the shift time; and
-travel can be timed on the real road network through OSRM, with directed times.
+travel can be timed on the real road network through OSRM, with directed times; and
+planning is about 4× faster on large shifts, with measured numbers.
 
 ## Code layout
 

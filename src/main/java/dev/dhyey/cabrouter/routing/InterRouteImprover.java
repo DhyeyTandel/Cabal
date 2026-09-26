@@ -1,8 +1,12 @@
 package dev.dhyey.cabrouter.routing;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Set;
 import java.util.function.BiFunction;
 
 /**
@@ -26,7 +30,22 @@ final class InterRouteImprover {
 
     private static final double EPS = 1e-9;
     private static final int NEIGHBOUR_CABS = 6;
-    private static final int MAX_PASSES = 50;
+    /**
+     * How much farther than their own cab's centre a rider may be from the other cab's
+     * centre and still be tried there. Measured on 1,000 riders (see README):
+     * 1.0 is fastest but loses 0.6 points of saving; 1.5 is the tightest value that
+     * keeps the full saving.
+     */
+    private static final double FILTER_SLACK = 1.5;
+
+    /**
+     * Small shifts search every move: they take milliseconds anyway, and on the
+     * 23-rider demo the filter cost 1.6% distance. Pruning starts above this many cabs
+     * (about 200 riders), where the full search starts to take seconds.
+     */
+    private static final int PRUNE_ABOVE_CABS = 40;
+    /** A safety net only; searches normally run out of dirty cabs long before this. */
+    private static final int MAX_PASSES = 500;
 
     /** Rebuilds a cab, keeping its vehicle, with a new set of riders. */
     private final BiFunction<PlannedCab, List<Stop>, PlannedCab> buildCab;
@@ -35,38 +54,98 @@ final class InterRouteImprover {
         this.buildCab = buildCab;
     }
 
+    /**
+     * Runs passes until no move helps. Two things keep this fast on large shifts:
+     *
+     * <ul>
+     *   <li><b>Only dirty pairs.</b> A pair is re-examined only if one of its cabs changed
+     *       in the previous pass. If neither changed, every move between them was
+     *       already rejected.</li>
+     *   <li><b>Each pair once.</b> Neighbour lists are usually mutual, so pairs are
+     *       collected without order before being tried.</li>
+     * </ul>
+     */
     List<PlannedCab> improve(List<PlannedCab> initial, RoutingParams params) {
         List<PlannedCab> cabs = new ArrayList<>(initial);
-        for (int pass = 0; pass < MAX_PASSES; pass++) {
-            if (!applyFirstImprovingMove(cabs, params)) {
-                break;
+        boolean prune = cabs.size() > PRUNE_ABOVE_CABS;
+        Set<PlannedCab> dirty = identitySet();
+        dirty.addAll(cabs);
+        for (int pass = 0; pass < MAX_PASSES && !dirty.isEmpty(); pass++) {
+            Set<PlannedCab> changed = identitySet();
+            for (PlannedCab[] pair : dirtyPairs(cabs, dirty)) {
+                int a = indexOf(cabs, pair[0]);
+                int b = indexOf(cabs, pair[1]);
+                if (a < 0 || b < 0) {
+                    continue; // one of them was replaced earlier in this pass
+                }
+                List<PlannedCab> created = tryRelocate(cabs, a, b, params, prune);
+                if (created == null) {
+                    created = tryRelocate(cabs, b, a, params, prune);
+                }
+                if (created == null) {
+                    created = trySwap(cabs, a, b, params, prune);
+                }
+                if (created != null) {
+                    changed.addAll(created);
+                }
             }
+            dirty = changed;
         }
         return cabs;
     }
 
-    private boolean applyFirstImprovingMove(List<PlannedCab> cabs, RoutingParams params) {
-        boolean changed = false;
+    private List<PlannedCab[]> dirtyPairs(List<PlannedCab> cabs, Set<PlannedCab> dirty) {
+        Set<Long> seen = new HashSet<>();
+        List<PlannedCab[]> pairs = new ArrayList<>();
         for (int a = 0; a < cabs.size(); a++) {
             for (int b : nearestCabs(cabs, a)) {
-                if (a >= cabs.size() || b >= cabs.size()) {
-                    break; // a relocate emptied a cab and the list shrank; start the next pass
+                if (!dirty.contains(cabs.get(a)) && !dirty.contains(cabs.get(b))) {
+                    continue;
                 }
-                if (tryRelocate(cabs, a, b, params) || tryRelocate(cabs, b, a, params) || trySwap(cabs, a, b, params)) {
-                    changed = true;
+                long key = (long) Math.min(a, b) * cabs.size() + Math.max(a, b);
+                if (seen.add(key)) {
+                    pairs.add(new PlannedCab[] {cabs.get(a), cabs.get(b)});
                 }
             }
         }
-        return changed;
+        return pairs;
     }
 
-    private boolean tryRelocate(List<PlannedCab> cabs, int from, int to, RoutingParams params) {
+    private static int indexOf(List<PlannedCab> cabs, PlannedCab cab) {
+        for (int i = 0; i < cabs.size(); i++) {
+            if (cabs.get(i) == cab) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Pruning filter, in the spirit of granular local search (Toth and Vigo, 2003): a
+     * rider is only worth moving to cab B if they sit roughly as close to B's centre as
+     * to their own cab's. Riders deep inside their own cluster would only lengthen B's
+     * route, so their moves are skipped without rebuilding any route.
+     */
+    private static boolean fitsBetterIn(Stop s, GeoPoint ownCentre, GeoPoint otherCentre) {
+        return HaversineTravelModel.greatCircleKm(s.location(), otherCentre)
+                < FILTER_SLACK * HaversineTravelModel.greatCircleKm(s.location(), ownCentre);
+    }
+
+    /** @return the cabs that replaced the old ones, or null if no improving relocate exists */
+    private List<PlannedCab> tryRelocate(List<PlannedCab> cabs, int from, int to, RoutingParams params,
+                                         boolean prune) {
         PlannedCab src = cabs.get(from);
         PlannedCab dst = cabs.get(to);
         if (!dst.hasFreeSeat()) {
-            return false;
+            return null;
         }
+        GeoPoint srcCentre = centroid(src);
+        GeoPoint dstCentre = centroid(dst);
         for (Stop s : src.stops()) {
+            // A one-rider cab is always worth trying to empty: it saves a vehicle.
+            if (prune && src.stops().size() > 1 && !fitsBetterIn(s, srcCentre, dstCentre)) {
+                continue;
+            }
             List<Stop> srcRest = without(src.stops(), s);
             PlannedCab newSrc = srcRest.isEmpty() ? null : buildCab.apply(src, srcRest);
             PlannedCab newDst = buildCab.apply(dst, with(dst.stops(), s));
@@ -74,30 +153,36 @@ final class InterRouteImprover {
                 cabs.set(to, newDst);
                 if (newSrc == null) {
                     cabs.remove(from);
-                } else {
-                    cabs.set(from, newSrc);
+                    return List.of(newDst);
                 }
-                return true;
+                cabs.set(from, newSrc);
+                return List.of(newSrc, newDst);
             }
         }
-        return false;
+        return null;
     }
 
-    private boolean trySwap(List<PlannedCab> cabs, int a, int b, RoutingParams params) {
+    /** @return the two rebuilt cabs, or null if no improving swap exists */
+    private List<PlannedCab> trySwap(List<PlannedCab> cabs, int a, int b, RoutingParams params, boolean prune) {
         PlannedCab ca = cabs.get(a);
         PlannedCab cb = cabs.get(b);
+        GeoPoint centreA = centroid(ca);
+        GeoPoint centreB = centroid(cb);
         for (Stop s : ca.stops()) {
             for (Stop t : cb.stops()) {
+                if (prune && !fitsBetterIn(s, centreA, centreB) && !fitsBetterIn(t, centreB, centreA)) {
+                    continue;
+                }
                 PlannedCab na = buildCab.apply(ca, with(without(ca.stops(), s), t));
                 PlannedCab nb = buildCab.apply(cb, with(without(cb.stops(), t), s));
                 if (accept(ca, cb, na, nb, params)) {
                     cabs.set(a, na);
                     cabs.set(b, nb);
-                    return true;
+                    return List.of(na, nb);
                 }
             }
         }
-        return false;
+        return null;
     }
 
     /** {@code newA} may be null, meaning cab A was emptied and dropped. */
@@ -145,6 +230,10 @@ final class InterRouteImprover {
             lng += s.location().lng();
         }
         return new GeoPoint(lat / cab.stops().size(), lng / cab.stops().size());
+    }
+
+    private static Set<PlannedCab> identitySet() {
+        return Collections.newSetFromMap(new IdentityHashMap<>());
     }
 
     private static List<Stop> without(List<Stop> stops, Stop s) {
