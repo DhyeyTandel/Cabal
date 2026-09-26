@@ -15,5 +15,21 @@ public record RoutingProperties(
         double escortDetourTolerance,
         int sweepStarts,
         int defaultCabCapacity,
-        int defaultMaxRideMinutes) {
+        int defaultMaxRideMinutes,
+        TravelModelKind travelModel,
+        Osrm osrm) {
+
+    public enum TravelModelKind {
+        HAVERSINE,
+        OSRM
+    }
+
+    /**
+     * @param baseUrl        OSRM server, for example http://localhost:5000
+     * @param durationFactor multiplier on OSRM's free-flow times to allow for traffic
+     * @param maxTableSize   coordinates per table request the server accepts
+     * @param timeoutSeconds connect and read timeout per request
+     */
+    public record Osrm(String baseUrl, double durationFactor, int maxTableSize, int timeoutSeconds) {
+    }
 }

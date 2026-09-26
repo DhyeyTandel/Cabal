@@ -1,8 +1,11 @@
 package dev.dhyey.cabrouter.config;
 
 import dev.dhyey.cabrouter.routing.HaversineTravelModel;
-import dev.dhyey.cabrouter.routing.RoutePlanner;
-import dev.dhyey.cabrouter.routing.TravelModel;
+import dev.dhyey.cabrouter.travel.HaversineProvider;
+import dev.dhyey.cabrouter.travel.OsrmClient;
+import dev.dhyey.cabrouter.travel.OsrmProvider;
+import dev.dhyey.cabrouter.travel.TravelModelProvider;
+import java.time.Duration;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -11,13 +14,15 @@ import org.springframework.context.annotation.Configuration;
 @EnableConfigurationProperties(RoutingProperties.class)
 public class RoutingConfig {
 
+    /** Haversine unless {@code routing.travel-model=osrm}; OSRM still uses haversine as its fallback. */
     @Bean
-    TravelModel travelModel(RoutingProperties props) {
-        return new HaversineTravelModel(props.circuityFactor(), props.averageSpeedKmph());
-    }
-
-    @Bean
-    RoutePlanner routePlanner(TravelModel travelModel) {
-        return new RoutePlanner(travelModel);
+    TravelModelProvider travelModelProvider(RoutingProperties props) {
+        HaversineTravelModel haversine = new HaversineTravelModel(props.circuityFactor(), props.averageSpeedKmph());
+        if (props.travelModel() != RoutingProperties.TravelModelKind.OSRM) {
+            return new HaversineProvider(haversine);
+        }
+        RoutingProperties.Osrm osrm = props.osrm();
+        OsrmClient client = new OsrmClient(osrm.baseUrl(), osrm.maxTableSize(), Duration.ofSeconds(osrm.timeoutSeconds()));
+        return new OsrmProvider(client, haversine, osrm.durationFactor());
     }
 }

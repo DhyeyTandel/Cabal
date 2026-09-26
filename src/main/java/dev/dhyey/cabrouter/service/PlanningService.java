@@ -22,10 +22,13 @@ import dev.dhyey.cabrouter.routing.RoutingParams;
 import dev.dhyey.cabrouter.routing.ShiftContext;
 import dev.dhyey.cabrouter.routing.Stop;
 import dev.dhyey.cabrouter.routing.StopTiming;
-import dev.dhyey.cabrouter.routing.TravelModel;
+import dev.dhyey.cabrouter.routing.RouteMetrics;
+import dev.dhyey.cabrouter.travel.TravelEstimate;
+import dev.dhyey.cabrouter.travel.TravelModelProvider;
 import dev.dhyey.cabrouter.routing.VehicleType;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -39,6 +42,9 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * Glue between the JPA model and the routing core. It loads entities, turns them into
  * {@link Stop}s, calls {@link RoutePlanner}, and writes the result back as cabs and stops.
+ *
+ * <p>Every operation first fetches a travel model for exactly the points it will touch
+ * (one OSRM table request when OSRM is on), then builds a planner over that model.
  */
 @Service
 @Transactional
@@ -47,17 +53,15 @@ public class PlanningService {
     private final OfficeRepository offices;
     private final EmployeeRepository employees;
     private final RoutePlanRepository plans;
-    private final RoutePlanner planner;
-    private final TravelModel travel;
+    private final TravelModelProvider travelProvider;
     private final RoutingProperties props;
 
     public PlanningService(OfficeRepository offices, EmployeeRepository employees, RoutePlanRepository plans,
-                           RoutePlanner planner, TravelModel travel, RoutingProperties props) {
+                           TravelModelProvider travelProvider, RoutingProperties props) {
         this.offices = offices;
         this.employees = employees;
         this.plans = plans;
-        this.planner = planner;
-        this.travel = travel;
+        this.travelProvider = travelProvider;
         this.props = props;
     }
 
@@ -99,18 +103,18 @@ public class PlanningService {
                 () -> new NotFoundException("employee " + employeeId + " is not on plan " + planId));
 
         if (strategy == ReplanStrategy.FULL) {
-            List<Stop> remaining = plan.getCabs().stream()
-                    .flatMap(c -> stopsOf(c).stream())
-                    .filter(s -> s.employeeId() != employeeId)
-                    .toList();
+            List<Stop> remaining = allStops(plan).stream().filter(s -> s.employeeId() != employeeId).toList();
             rebuildAll(plan, remaining);
         } else {
             List<Stop> remaining = stopsOf(cab).stream().filter(s -> s.employeeId() != employeeId).toList();
             if (remaining.isEmpty()) {
                 plan.getCabs().remove(cab);
             } else {
+                Session session = session(plan, remaining);
                 // The cab keeps its vehicle even if a smaller one would now do: it is already dispatched.
-                write(plan, cab, planner.buildCab(plan.getOffice().location(), cab.vehicle(), remaining, params(plan)));
+                PlannedCab rebuilt = session.planner().buildCab(
+                        plan.getOffice().location(), cab.vehicle(), remaining, params(plan));
+                write(plan, cab, rebuilt, session);
             }
         }
         plan.touch();
@@ -127,12 +131,17 @@ public class PlanningService {
                 .orElseThrow(() -> new NotFoundException("employee " + employeeId + " not found"));
         requireSameOffice(employee, plan.getOffice());
 
-        List<PlannedCab> current = plan.getCabs().stream().map(c -> toPlanned(plan, c)).toList();
+        Stop newcomer = toStop(employee);
+        List<Stop> everyone = new ArrayList<>(allStops(plan));
+        everyone.add(newcomer);
+        Session session = session(plan, everyone);
+
+        List<PlannedCab> current = plan.getCabs().stream().map(c -> toPlanned(plan, c, session)).toList();
         RoutePlanner.Insertion insertion =
-                planner.bestInsertion(plan.getOffice().location(), current, toStop(employee), params(plan));
+                session.planner().bestInsertion(plan.getOffice().location(), current, newcomer, params(plan));
 
         CabRoute target = insertion.opensNewCab() ? plan.addCab() : plan.getCabs().get(insertion.cabIndex());
-        write(plan, target, insertion.cab());
+        write(plan, target, insertion.cab(), session);
         plan.touch();
         return PlanResponse.from(plan);
     }
@@ -140,26 +149,39 @@ public class PlanningService {
     /** Re-optimise everything, e.g. after several local repairs have drifted from optimal. */
     public PlanResponse replan(long planId) {
         RoutePlan plan = load(planId);
-        List<Stop> all = plan.getCabs().stream().flatMap(c -> stopsOf(c).stream()).toList();
-        rebuildAll(plan, all);
+        rebuildAll(plan, allStops(plan));
         plan.touch();
         return PlanResponse.from(plan);
     }
 
     private void rebuildAll(RoutePlan plan, List<Stop> stops) {
-        List<PlannedCab> planned = planner.plan(plan.getOffice().location(), stops, params(plan));
+        Session session = session(plan, stops);
+        List<PlannedCab> planned = session.planner().plan(plan.getOffice().location(), stops, params(plan));
         plan.getCabs().clear();
         for (PlannedCab pc : planned) {
-            write(plan, plan.addCab(), pc);
+            write(plan, plan.addCab(), pc, session);
         }
     }
 
-    private void write(RoutePlan plan, CabRoute cab, PlannedCab planned) {
-        LocalDateTime officeTime = officeTime(plan);
-        List<StopTiming> timings = EtaCalculator.compute(travel, plan.getOffice().location(), planned.stops(),
-                plan.getDirection(), officeTime, props.dwellMinutes());
+    /** A travel model for the office plus these stops, and a planner that uses it. */
+    private record Session(TravelEstimate travel, RoutePlanner planner) {
+    }
 
-        cab.update(planned.vehicle(), planned.distanceKm(), planned.maxRideMinutes(), planned.escortRequired(), officeTime);
+    private Session session(RoutePlan plan, Collection<Stop> stops) {
+        List<GeoPoint> points = new ArrayList<>(stops.size() + 1);
+        points.add(plan.getOffice().location());
+        stops.forEach(s -> points.add(s.location()));
+        TravelEstimate travel = travelProvider.forPoints(points);
+        return new Session(travel, new RoutePlanner(travel.model()));
+    }
+
+    private void write(RoutePlan plan, CabRoute cab, PlannedCab planned, Session session) {
+        LocalDateTime officeTime = officeTime(plan);
+        List<StopTiming> timings = EtaCalculator.compute(session.travel().model(), plan.getOffice().location(),
+                planned.stops(), plan.getDirection(), officeTime, props.dwellMinutes());
+
+        cab.update(planned.vehicle(), planned.distanceKm(), planned.maxRideMinutes(), planned.escortRequired(),
+                officeTime, session.travel().source());
         cab.getStops().clear();
         int sequence = 1;
         for (StopTiming t : timings) {
@@ -168,13 +190,26 @@ public class PlanningService {
         }
     }
 
-    /** Rebuilds the routing view of a stored cab. Stored stops are in driving order. */
-    private PlannedCab toPlanned(RoutePlan plan, CabRoute cab) {
+    /**
+     * Rebuilds the routing view of a stored cab. Stored stops are in driving order.
+     * Distance and ride time are re-measured with this call's travel model, so an
+     * insertion compares like with like even if the cab was first timed another way.
+     */
+    private PlannedCab toPlanned(RoutePlan plan, CabRoute cab, Session session) {
         List<Stop> outward = new ArrayList<>(stopsOf(cab));
         if (plan.getDirection() == Direction.PICKUP) {
             Collections.reverse(outward);
         }
-        return new PlannedCab(cab.vehicle(), outward, cab.getDistanceKm(), cab.getMaxRideMinutes(), cab.isEscortRequired());
+        GeoPoint office = plan.getOffice().location();
+        return new PlannedCab(cab.vehicle(), outward,
+                RouteMetrics.pathKm(session.travel().model(), office, outward),
+                RouteMetrics.maxRideMinutes(session.travel().model(), office, outward, props.dwellMinutes(),
+                        plan.getDirection()),
+                cab.isEscortRequired());
+    }
+
+    private List<Stop> allStops(RoutePlan plan) {
+        return plan.getCabs().stream().flatMap(c -> stopsOf(c).stream()).toList();
     }
 
     private List<Stop> stopsOf(CabRoute cab) {

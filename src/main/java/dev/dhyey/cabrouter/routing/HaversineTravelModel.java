@@ -25,12 +25,17 @@ public final class HaversineTravelModel implements TravelModel {
 
     @Override
     public double distanceKm(GeoPoint a, GeoPoint b) {
+        return greatCircleKm(a, b) * circuityFactor;
+    }
+
+    /** Straight-line distance over the Earth's surface, with no road factor. */
+    public static double greatCircleKm(GeoPoint a, GeoPoint b) {
         double dLat = Math.toRadians(b.lat() - a.lat());
         double dLng = Math.toRadians(b.lng() - a.lng());
         double h = Math.pow(Math.sin(dLat / 2), 2)
                 + Math.cos(Math.toRadians(a.lat())) * Math.cos(Math.toRadians(b.lat()))
                 * Math.pow(Math.sin(dLng / 2), 2);
-        return 2 * EARTH_RADIUS_KM * Math.asin(Math.min(1, Math.sqrt(h))) * circuityFactor;
+        return 2 * EARTH_RADIUS_KM * Math.asin(Math.min(1, Math.sqrt(h)));
     }
 
     @Override

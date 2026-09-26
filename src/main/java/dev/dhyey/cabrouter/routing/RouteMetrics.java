@@ -28,15 +28,20 @@ public final class RouteMetrics {
 
     /**
      * Ride minutes for each stop: drive time between the stop and the office plus a dwell
-     * for every stop in between. The same number holds for pickup and drop, because a
-     * pickup route is the drop route reversed.
+     * for every stop in between.
+     *
+     * <p>Drive times may be directed (one-way streets), so the legs are timed the way the
+     * cab really drives them: outward from the office for DROP, and back towards it for
+     * PICKUP. With a symmetric model both give the same answer.
      */
-    public static double[] rideMinutes(TravelModel travel, GeoPoint office, List<Stop> outward, double dwell) {
+    public static double[] rideMinutes(TravelModel travel, GeoPoint office, List<Stop> outward, double dwell,
+                                       Direction direction) {
         double[] ride = new double[outward.size()];
         double elapsed = 0;
         GeoPoint prev = office;
         for (int k = 0; k < outward.size(); k++) {
-            elapsed += travel.minutes(prev, outward.get(k).location());
+            GeoPoint here = outward.get(k).location();
+            elapsed += direction == Direction.DROP ? travel.minutes(prev, here) : travel.minutes(here, prev);
             ride[k] = elapsed + k * dwell;
             prev = outward.get(k).location();
         }
@@ -44,8 +49,9 @@ public final class RouteMetrics {
     }
 
     /** The farthest stop always rides longest, so this is the last entry. */
-    public static double maxRideMinutes(TravelModel travel, GeoPoint office, List<Stop> outward, double dwell) {
-        double[] ride = rideMinutes(travel, office, outward, dwell);
+    public static double maxRideMinutes(TravelModel travel, GeoPoint office, List<Stop> outward, double dwell,
+                                        Direction direction) {
+        double[] ride = rideMinutes(travel, office, outward, dwell, direction);
         return ride.length == 0 ? 0 : ride[ride.length - 1];
     }
 }

@@ -11,7 +11,7 @@ and a cap on how long any one person spends in the car. That problem is NP-hard,
 pipeline of classic heuristics and measures how close they get to optimal.
 
 Stack: Java 17, Spring Boot 4, Spring Data JPA (Hibernate 7), PostgreSQL 16, Flyway,
-JUnit 5, AssertJ, MockMvc.
+OSRM (optional, for road-network travel times), JUnit 5, AssertJ, MockMvc.
 
 ## Running it
 
@@ -22,6 +22,13 @@ createdb cabrouter
 export JAVA_HOME=/opt/homebrew/opt/openjdk@17   # or wherever your JDK 17+ lives
 ./mvnw spring-boot:run                          # Flyway creates the schema on startup
 ./scripts/demo.sh                               # seeds 24 Bengaluru employees and plans a shift
+```
+
+To time routes on real roads instead of straight lines, point it at an OSRM server
+(see [Travel times](#travel-times-haversine-or-osrm)):
+
+```bash
+TRAVEL_MODEL=osrm OSRM_URL=http://localhost:5000 ./mvnw spring-boot:run
 ```
 
 Database settings come from `DB_URL`, `DB_USER` and `DB_PASSWORD`. By default it
@@ -72,7 +79,9 @@ Errors come back as RFC 9457 problem details:
 | 409 | Duplicate booking, or a concurrent edit |
 | 422 | The fleet is too small to seat everyone within the ride limit |
 
-A plan response lists each cab's vehicle and its stops in driving order, with ETAs:
+A plan response lists each cab's vehicle and its stops in driving order, with ETAs.
+Each cab also reports `travelSource` (`HAVERSINE`, `OSRM` or `HAVERSINE_FALLBACK`),
+the model that timed it:
 
 ```text
 cab 2 SEDAN [2/4 seats, 32.17 km, longest ride 89.73 min, ESCORT]: office 22:10 -> Aditya 23:08 -> Lakshmi 23:40
@@ -163,6 +172,56 @@ assignment exists, it finds one.
 Each stop adds a 2-minute dwell. Ride time is the drive time plus the dwell at every
 stop between you and the office.
 
+### Travel times: haversine or OSRM
+
+Everything above asks one interface, `TravelModel`, for distance and drive time. There
+are two implementations:
+
+| | `haversine` (default) | `osrm` |
+|---|---|---|
+| Distance | Straight line × 1.4 | Real road distance |
+| Time | Distance at a flat 22 km/h | OSRM free-flow time × 2.0 for traffic |
+| Direction | Symmetric | Directed (one-way streets, divided roads) |
+| Needs | Nothing | An OSRM server |
+
+**How OSRM is used.** Each API call fetches one distance/time matrix covering exactly
+the points it touches: the office plus the riders involved. That is one request per
+operation, not one per pair. OSRM servers cap coordinates per request (100 on the
+public demo server), so larger shifts are split into blocks. For each pair of blocks,
+one request asks for block A as sources and block B as destinations, and the pieces are
+stitched into the full matrix. A test checks every stitched entry against a stub
+server.
+
+**Asymmetry.** Real roads are not symmetric, but 2-opt's segment reversal is only valid
+for a symmetric cost. So the optimiser minimises the **mean of both directions'
+distance**, while ride limits and ETAs use the **directed time** for the way the cab
+actually drives: towards the office for pickups, away from it for drops.
+
+**Traffic.** OSRM times assume empty roads. On the demo points, its median speed is
+46.9 km/h, which nobody drives across Bengaluru at 18:00. So times are multiplied by
+`routing.osrm.duration-factor` (2.0 by default).
+
+**Failure.** If OSRM is down or errors, the call falls back to haversine and marks the
+cabs `HAVERSINE_FALLBACK`. An OSRM outage makes the plan less accurate but does not
+stop it being made. A pair OSRM cannot route (such as a point snapped to a disconnected
+road) is estimated by haversine rather than failing the plan.
+
+**Privacy.** The OSRM request contains employees' home coordinates. Do not send those
+to the public demo server in production: run your own. Logs never include the request
+URL, for the same reason. To self-host for Bengaluru:
+
+```bash
+wget https://download.geofabrik.de/asia/india/southern-zone-latest.osm.pbf   # ~560 MB
+docker run -t -v "$PWD:/data" ghcr.io/project-osrm/osrm-backend osrm-extract -p /opt/car.lua /data/southern-zone-latest.osm.pbf
+docker run -t -v "$PWD:/data" ghcr.io/project-osrm/osrm-backend osrm-partition /data/southern-zone-latest.osrm
+docker run -t -v "$PWD:/data" ghcr.io/project-osrm/osrm-backend osrm-customize /data/southern-zone-latest.osrm
+docker run -t -p 5000:5000 -v "$PWD:/data" ghcr.io/project-osrm/osrm-backend osrm-routed --algorithm mld --max-table-size 1000 /data/southern-zone-latest.osrm
+```
+
+Then set `OSRM_URL=http://localhost:5000` and raise `routing.osrm.max-table-size` to
+match. (These are the OSRM project's standard steps. The service itself was tested
+against the public demo server and a stub, not a self-hosted instance.)
+
 ### Re-planning
 
 | | `LOCAL` (default) | `FULL` |
@@ -194,6 +253,18 @@ From the test suite (fixed seeds, so these numbers are reproducible):
 | Demo shift (23 riders, Bengaluru), 4-seat cabs only | 136.5 km to 128.2 km with the same 7 cabs |
 | Same riders, sedans plus 2 six-seat SUVs | 6 vehicles instead of 7 |
 
+**How good is the haversine model?** Checked against OSRM's real road network for all
+600 ordered pairs among the 25 demo points (office plus 24 homes):
+
+| Assumption | Real roads |
+|---|---|
+| Road distance = straight line × 1.4 | Median ratio **1.37**, but p10 1.23, p90 1.61 and worst **4.34** |
+| Drive time is the same both ways | Median difference 4.6%, p90 14.2% |
+
+So the 1.4 factor is well calibrated on average but can be badly wrong for a specific
+pair, such as two homes on opposite sides of a lake or rail line. That is exactly the
+case where OSRM changes the plan.
+
 The brute-force comparison is what gives the heuristic claims weight: the test would
 fail if the sequencer ever reported a route shorter than the true optimum (an
 arithmetic bug) or longer than its own starting point.
@@ -202,12 +273,11 @@ arithmetic bug) or longer than its own starting point.
 
 These are honest gaps, roughly in the order I would fix them:
 
-1. **Straight-line travel times.** Distance is haversine × 1.4 at a flat 22 km/h. Real
-   Bengaluru traffic varies hugely by road and hour, and a river or flyover can make
-   a 2 km neighbour a 20-minute drive. `TravelModel` is an interface precisely so a
-   road-network matrix (OSRM, Google Distance Matrix) can replace it. Everything
-   downstream assumes symmetry, which real traffic breaks, so an asymmetric model
-   would also need direction-aware 2-opt.
+1. **No live traffic.** With OSRM, distances and road topology are real, but traffic is
+   one flat multiplier. A 07:00 pickup and a 09:30 one on the same road get the same
+   factor. Time-of-day speed profiles (OSRM supports custom segment speeds) or a
+   traffic-aware matrix API would fix this. Without OSRM, straight-line estimates can
+   be off by up to 4× for individual pairs (measured above).
 2. **No global optimality guarantee.** Sweep plus local search finds good plans, not
    optimal ones. For large shifts, a metaheuristic (simulated annealing, or ALNS as used
    in production VRP solvers) or a solver like OR-Tools would do better.
@@ -224,16 +294,19 @@ These are honest gaps, roughly in the order I would fix them:
    O(starts × n × c²) and the inter-route pass roughly O(cabs × 6 × c²) per pass,
    where c is cab size. Fine for a shift, but not benchmarked at city scale.
 
-Fixed since the first version: plans now use a mixed, limited fleet, and the escort
-rule checks each cab's actual first-pickup or last-drop time instead of the shift time.
+Fixed since the first version: plans now use a mixed, limited fleet; the escort rule
+checks each cab's actual first-pickup or last-drop time instead of the shift time; and
+travel can be timed on the real road network through OSRM, with directed times.
 
 ## Code layout
 
 ```
 routing/   the algorithm: plain Java, no Spring, unit-tested in isolation
   SweepClusterer, StopSequencer, InterRouteImprover, RoutePlanner, EtaCalculator,
-  Fleet, FleetInventory, ShiftContext, TravelModel (+ HaversineTravelModel),
-  RouteMetrics, value records
+  Fleet, FleetInventory, ShiftContext, TravelModel (+ HaversineTravelModel,
+  MatrixTravelModel), RouteMetrics, value records
+travel/    where travel times come from: HaversineProvider, OsrmProvider + OsrmClient
+           (matrix fetching, chunking, fallback)
 domain/    JPA entities (Office, Employee, RoutePlan + PlanVehicleType, CabRoute,
            RouteStop) and repositories
 service/   PlanningService (entities to routing and back), DirectoryService
@@ -242,6 +315,7 @@ config/    RoutingProperties (all tunables in application.properties)
 db/migration/   schema, owned by Flyway; Hibernate only validates it
   V1__init.sql          initial schema
   V2__mixed_fleet.sql   adds fleets and migrates existing plans in place
+  V3__travel_source.sql records which travel model timed each cab
 ```
 
 Other design choices worth knowing:

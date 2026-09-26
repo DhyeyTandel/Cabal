@@ -1,7 +1,10 @@
 package dev.dhyey.cabrouter.domain;
 
 import dev.dhyey.cabrouter.routing.VehicleType;
+import dev.dhyey.cabrouter.travel.TravelSource;
 import jakarta.persistence.CascadeType;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
@@ -35,6 +38,9 @@ public class CabRoute {
     private double maxRideMinutes;
     private boolean escortRequired;
 
+    @Enumerated(EnumType.STRING)
+    private TravelSource travelSource;
+
     /** Office arrival for pickups, office departure for drops. */
     private LocalDateTime officeTime;
 
@@ -52,7 +58,8 @@ public class CabRoute {
     }
 
     public void update(VehicleType vehicle, double distanceKm, double maxRideMinutes, boolean escortRequired,
-                       LocalDateTime officeTime) {
+                       LocalDateTime officeTime, TravelSource travelSource) {
+        this.travelSource = travelSource;
         this.vehicleType = vehicle.name();
         this.seats = vehicle.seats();
         this.distanceKm = distanceKm;
@@ -87,6 +94,10 @@ public class CabRoute {
 
     public boolean isEscortRequired() {
         return escortRequired;
+    }
+
+    public TravelSource getTravelSource() {
+        return travelSource;
     }
 
     public LocalDateTime getOfficeTime() {

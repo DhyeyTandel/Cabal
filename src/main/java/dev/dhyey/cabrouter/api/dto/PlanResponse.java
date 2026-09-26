@@ -4,6 +4,7 @@ import dev.dhyey.cabrouter.domain.CabRoute;
 import dev.dhyey.cabrouter.domain.RoutePlan;
 import dev.dhyey.cabrouter.domain.RouteStop;
 import dev.dhyey.cabrouter.routing.Direction;
+import dev.dhyey.cabrouter.travel.TravelSource;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -27,7 +28,8 @@ public record PlanResponse(
     }
 
     /**
-     * @param officeTime arrival at the office for PICKUP, departure from it for DROP
+     * @param officeTime   arrival at the office for PICKUP, departure from it for DROP
+     * @param travelSource which travel model timed this cab
      */
     public record Cab(
             int cabNumber,
@@ -38,6 +40,7 @@ public record PlanResponse(
             double maxRideMinutes,
             boolean escortRequired,
             LocalDateTime officeTime,
+            TravelSource travelSource,
             List<StopView> stops) {
     }
 
@@ -76,7 +79,7 @@ public record PlanResponse(
     private static Cab cab(CabRoute c) {
         List<StopView> stops = c.getStops().stream().map(PlanResponse::stop).toList();
         return new Cab(c.getCabNumber(), c.vehicle().name(), c.vehicle().seats(), stops.size(), round(c.getDistanceKm()), round(c.getMaxRideMinutes()),
-                c.isEscortRequired(), c.getOfficeTime(), stops);
+                c.isEscortRequired(), c.getOfficeTime(), c.getTravelSource(), stops);
     }
 
     private static StopView stop(RouteStop s) {

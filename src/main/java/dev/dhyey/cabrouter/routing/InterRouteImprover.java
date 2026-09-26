@@ -28,12 +28,10 @@ final class InterRouteImprover {
     private static final int NEIGHBOUR_CABS = 6;
     private static final int MAX_PASSES = 50;
 
-    private final TravelModel travel;
     /** Rebuilds a cab, keeping its vehicle, with a new set of riders. */
     private final BiFunction<PlannedCab, List<Stop>, PlannedCab> buildCab;
 
-    InterRouteImprover(TravelModel travel, BiFunction<PlannedCab, List<Stop>, PlannedCab> buildCab) {
-        this.travel = travel;
+    InterRouteImprover(BiFunction<PlannedCab, List<Stop>, PlannedCab> buildCab) {
         this.buildCab = buildCab;
     }
 
@@ -133,7 +131,9 @@ final class InterRouteImprover {
                 others.add(i);
             }
         }
-        others.sort(Comparator.comparingDouble(i -> travel.distanceKm(ca, centroid(cabs.get(i)))));
+        // Centroids are not real stops, so a matrix-backed model has no entry for them.
+        // Straight-line distance is plenty for choosing which cabs to compare.
+        others.sort(Comparator.comparingDouble(i -> HaversineTravelModel.greatCircleKm(ca, centroid(cabs.get(i)))));
         return others.subList(0, Math.min(NEIGHBOUR_CABS, others.size()));
     }
 

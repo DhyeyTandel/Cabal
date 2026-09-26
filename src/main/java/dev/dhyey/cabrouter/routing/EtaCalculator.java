@@ -21,7 +21,7 @@ public final class EtaCalculator {
      */
     public static List<StopTiming> compute(TravelModel travel, GeoPoint office, List<Stop> outward,
                                            Direction direction, LocalDateTime officeTime, double dwellMinutes) {
-        double[] ride = RouteMetrics.rideMinutes(travel, office, outward, dwellMinutes);
+        double[] ride = RouteMetrics.rideMinutes(travel, office, outward, dwellMinutes, direction);
         List<StopTiming> timings = new ArrayList<>(outward.size());
 
         if (direction == Direction.DROP) {

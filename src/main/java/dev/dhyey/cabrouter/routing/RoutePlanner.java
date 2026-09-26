@@ -33,7 +33,7 @@ public final class RoutePlanner {
     /** @throws FleetExhaustedException if the fleet cannot seat everyone */
     public List<PlannedCab> plan(GeoPoint office, List<Stop> stops, RoutingParams params) {
         List<PlannedCab> swept = sweepOnly(office, stops, params);
-        List<PlannedCab> improved = new InterRouteImprover(travel,
+        List<PlannedCab> improved = new InterRouteImprover(
                 (cab, members) -> buildCab(office, cab.vehicle(), members, params)).improve(swept, params);
         return rightSize(improved, params.fleet());
     }
@@ -113,12 +113,12 @@ public final class RoutePlanner {
                 vehicle,
                 route,
                 RouteMetrics.pathKm(travel, office, route),
-                RouteMetrics.maxRideMinutes(travel, office, route, params.dwellMinutes()),
+                RouteMetrics.maxRideMinutes(travel, office, route, params.dwellMinutes(), params.shift().direction()),
                 escortRequired);
     }
 
     private boolean farEndAtNight(GeoPoint office, List<Stop> route, RoutingParams params) {
-        double ride = RouteMetrics.maxRideMinutes(travel, office, route, params.dwellMinutes());
+        double ride = RouteMetrics.maxRideMinutes(travel, office, route, params.dwellMinutes(), params.shift().direction());
         LocalDateTime when = params.shift().farEndTime(ride, params.dwellMinutes());
         return params.shift().isNight(when);
     }
@@ -126,7 +126,7 @@ public final class RoutePlanner {
     private List<Stop> escortSafeRoute(GeoPoint office, List<Stop> stops, List<Stop> unconstrained, RoutingParams params) {
         double baseKm = RouteMetrics.pathKm(travel, office, unconstrained);
         double rideLimit = Math.max(params.maxRideMinutes(),
-                RouteMetrics.maxRideMinutes(travel, office, unconstrained, params.dwellMinutes()));
+                RouteMetrics.maxRideMinutes(travel, office, unconstrained, params.dwellMinutes(), params.shift().direction()));
 
         List<Stop> best = null;
         double bestKm = baseKm * (1 + params.escortDetourTolerance());
@@ -140,7 +140,7 @@ public final class RoutePlanner {
             candidate.add(anchor);
 
             double km = RouteMetrics.pathKm(travel, office, candidate);
-            double ride = RouteMetrics.maxRideMinutes(travel, office, candidate, params.dwellMinutes());
+            double ride = RouteMetrics.maxRideMinutes(travel, office, candidate, params.dwellMinutes(), params.shift().direction());
             if (km <= bestKm + 1e-9 && ride <= rideLimit) {
                 best = candidate;
                 bestKm = km;

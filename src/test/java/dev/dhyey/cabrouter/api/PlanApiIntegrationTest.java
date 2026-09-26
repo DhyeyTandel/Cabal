@@ -68,6 +68,7 @@ class PlanApiIntegrationTest {
                 .andExpect(jsonPath("$.employeeCount").value(9))
                 .andExpect(jsonPath("$.revision").value(1))
                 .andExpect(jsonPath("$.cabs[0].officeTime").value("2026-10-01T08:45:00"))
+                .andExpect(jsonPath("$.cabs[0].travelSource").value("HAVERSINE"))
                 .andReturn();
         long planId = id(created);
         String before = created.getResponse().getContentAsString();
