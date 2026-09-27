@@ -31,16 +31,6 @@ public record ShiftContext(Direction direction, LocalDateTime officeTime, int ni
         this(direction, officeTime, nightStartHour, nightEndHour, TrafficProfile.flat(1.0));
     }
 
-    /**
-     * Time the cab is at the far-end stop, given that stop's ride minutes. Uses the same
-     * arithmetic as {@link EtaCalculator}.
-     */
-    public LocalDateTime farEndTime(double farEndRideMinutes, double dwellMinutes) {
-        return direction == Direction.PICKUP
-                ? officeTime.minusMinutes(Math.round(farEndRideMinutes + dwellMinutes))
-                : officeTime.plusMinutes(Math.round(farEndRideMinutes));
-    }
-
     public boolean isNight(LocalDateTime time) {
         int h = time.getHour();
         if (nightStartHour == nightEndHour) {

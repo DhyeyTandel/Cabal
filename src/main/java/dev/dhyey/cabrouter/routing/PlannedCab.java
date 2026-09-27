@@ -10,7 +10,7 @@ public record PlannedCab(
         VehicleType vehicle,
         List<Stop> stops,
         double distanceKm,
-        double maxRideMinutes,
+        Timetable timetable,
         boolean escortRequired) {
 
     public PlannedCab {
@@ -25,7 +25,11 @@ public record PlannedCab(
         return stops.size() < vehicle.seats();
     }
 
+    public double maxRideMinutes() {
+        return timetable.maxRideMinutes();
+    }
+
     public PlannedCab withVehicle(VehicleType other) {
-        return new PlannedCab(other, stops, distanceKm, maxRideMinutes, escortRequired);
+        return new PlannedCab(other, stops, distanceKm, timetable, escortRequired);
     }
 }

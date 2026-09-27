@@ -1,6 +1,5 @@
 package dev.dhyey.cabrouter.routing;
 
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -108,34 +107,25 @@ public final class RoutePlanner {
                     vehicle.name() + " over capacity: " + stops.size() + " > " + vehicle.seats());
         }
         List<Stop> route = sequencer.sequence(office, stops);
+        Timetable timetable = Timetable.of(travel, office, route, params.shift(), params.dwellMinutes());
         boolean escortRequired = false;
 
-        if (route.get(route.size() - 1).escortSensitive() && farEndAtNight(office, route, params)) {
+        if (route.get(route.size() - 1).escortSensitive() && params.shift().isNight(timetable.farEndTime())) {
             List<Stop> repaired = escortSafeRoute(office, stops, route, params);
             if (repaired != null) {
                 route = repaired;
+                timetable = Timetable.of(travel, office, route, params.shift(), params.dwellMinutes());
             } else {
                 escortRequired = true;
             }
         }
-        return new PlannedCab(
-                vehicle,
-                route,
-                RouteMetrics.pathKm(travel, office, route),
-                RouteMetrics.maxRideMinutes(travel, office, route, params.dwellMinutes(), params.shift()),
-                escortRequired);
-    }
-
-    private boolean farEndAtNight(GeoPoint office, List<Stop> route, RoutingParams params) {
-        double ride = RouteMetrics.maxRideMinutes(travel, office, route, params.dwellMinutes(), params.shift());
-        LocalDateTime when = params.shift().farEndTime(ride, params.dwellMinutes());
-        return params.shift().isNight(when);
+        return new PlannedCab(vehicle, route, RouteMetrics.pathKm(travel, office, route), timetable, escortRequired);
     }
 
     private List<Stop> escortSafeRoute(GeoPoint office, List<Stop> stops, List<Stop> unconstrained, RoutingParams params) {
         double baseKm = RouteMetrics.pathKm(travel, office, unconstrained);
         double rideLimit = Math.max(params.maxRideMinutes(),
-                RouteMetrics.maxRideMinutes(travel, office, unconstrained, params.dwellMinutes(), params.shift()));
+                Timetable.of(travel, office, unconstrained, params.shift(), params.dwellMinutes()).maxRideMinutes());
 
         List<Stop> best = null;
         double bestKm = baseKm * (1 + params.escortDetourTolerance());
@@ -149,7 +139,7 @@ public final class RoutePlanner {
             candidate.add(anchor);
 
             double km = RouteMetrics.pathKm(travel, office, candidate);
-            double ride = RouteMetrics.maxRideMinutes(travel, office, candidate, params.dwellMinutes(), params.shift());
+            double ride = Timetable.of(travel, office, candidate, params.shift(), params.dwellMinutes()).maxRideMinutes();
             if (km <= bestKm + 1e-9 && ride <= rideLimit) {
                 best = candidate;
                 bestKm = km;

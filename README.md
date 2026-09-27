@@ -180,13 +180,18 @@ loses one option it could equally have used. If any valid assignment exists, the
 greedy pass finds one. It is not guaranteed to find the *cheapest* assignment (that is
 a min-cost matching problem), but with two or three vehicle types the gap is small.
 
-### 6. ETAs (`EtaCalculator`)
+### 6. ETAs (`Timetable`)
 
 - **Pickup** works backwards from `shiftTime - 15 min`.
 - **Drop** works forwards from `shiftTime + 10 min`.
 
 Each stop adds a 2-minute dwell. Ride time is the drive time plus the dwell at every
 stop between you and the office.
+
+All timing for a cab comes from one `Timetable`, built once when the cab is: ride
+minutes, ETAs in driving order, the longest ride, and the far-end time the night
+escort rule checks. The far-end time and the ETAs share one code path, so the night
+check can never disagree with the ETA a rider is sent.
 
 ### 7. Traffic by time of day (`TrafficProfile`)
 
@@ -406,7 +411,7 @@ timed with the traffic at the hour it is driven.
 routing/   the algorithm: plain Java, no Spring, unit-tested in isolation
   ShiftPlan: the plan-editing module (create, cancel, add, replan); the rest of
   routing/ sits behind it
-  SweepClusterer, StopSequencer, InterRouteImprover, RoutePlanner, EtaCalculator,
+  SweepClusterer, StopSequencer, InterRouteImprover, RoutePlanner, Timetable,
   Fleet, FleetInventory, ShiftContext, TrafficProfile, TravelModel (+ HaversineTravelModel,
   MatrixTravelModel), RouteMetrics, value records
 travel/    where travel times come from: HaversineProvider, OsrmProvider + OsrmClient

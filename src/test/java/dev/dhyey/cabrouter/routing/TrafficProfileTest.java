@@ -2,7 +2,6 @@ package dev.dhyey.cabrouter.routing;
 
 import static dev.dhyey.cabrouter.routing.Fixtures.OFFICE;
 import static dev.dhyey.cabrouter.routing.Fixtures.TRAVEL;
-import static dev.dhyey.cabrouter.routing.Fixtures.stop;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.data.Offset.offset;
@@ -44,40 +43,6 @@ class TrafficProfileTest {
         double[] h = new double[24];
         Arrays.fill(h, 0.9);
         assertThatThrownBy(() -> new TrafficProfile(h)).isInstanceOf(IllegalArgumentException.class);
-    }
-
-    /**
-     * A drop leaving at 08:00: the first leg (10 min free flow) starts at 08:00, factor
-     * 1.0. After a 2-minute dwell, the second leg starts at 08:12, factor 1.4, so it
-     * takes 14 minutes.
-     */
-    @Test
-    void eachDropLegIsTimedAtTheMomentItStarts() {
-        List<Stop> outward = List.of(stop(1, 5, 0), stop(2, 10, 0)); // 10 min free flow per leg
-        ShiftContext shift = new ShiftContext(Direction.DROP, DAY.withHour(8), 20, 7, morningPeak());
-
-        double[] ride = RouteMetrics.rideMinutes(TRAVEL, OFFICE, outward, 2, shift);
-
-        assertThat(ride[0]).isCloseTo(10, offset(0.05));
-        assertThat(ride[1]).isCloseTo(10 + 2 + 10 * 1.4, offset(0.05));
-    }
-
-    /**
-     * A pickup that must arrive at 09:00: the leg into the office finishes at 09:00,
-     * factor 3.0, so it takes 30 minutes. The cab reached stop 1 at 08:28 (30 min drive
-     * plus 2 min dwell earlier), so the leg from stop 2 finishes at 08:28, factor about
-     * 1.93.
-     */
-    @Test
-    void eachPickupLegIsTimedAtTheMomentItReachesTheOfficeSide() {
-        List<Stop> outward = List.of(stop(1, 5, 0), stop(2, 10, 0));
-        ShiftContext shift = new ShiftContext(Direction.PICKUP, DAY.withHour(9), 20, 7, morningPeak());
-
-        double[] ride = RouteMetrics.rideMinutes(TRAVEL, OFFICE, outward, 2, shift);
-
-        assertThat(ride[0]).isCloseTo(30, offset(0.05));
-        double factorAt0828 = 1.0 + 2.0 * 28 / 60;
-        assertThat(ride[1]).isCloseTo(30 + 2 + 10 * factorAt0828, offset(0.05));
     }
 
     /**

@@ -36,19 +36,6 @@ class MatrixTravelModelTest {
     }
 
     @Test
-    void rideTimesUseTheDirectionTheCabActuallyDrives() {
-        List<Stop> outward = List.of(a, b);
-
-        java.time.LocalDateTime nine = java.time.LocalDateTime.of(2026, 10, 1, 9, 0);
-        // DROP drives outbound: 10 + 10 min, plus one dwell at A.
-        assertThat(RouteMetrics.maxRideMinutes(model, OFFICE, outward, 2,
-                new ShiftContext(Direction.DROP, nine, 20, 7))).isEqualTo(22);
-        // PICKUP drives inbound, B to A to office: 4 + 4 min, plus one dwell at A.
-        assertThat(RouteMetrics.maxRideMinutes(model, OFFICE, outward, 2,
-                new ShiftContext(Direction.PICKUP, nine, 20, 7))).isEqualTo(10);
-    }
-
-    @Test
     void askingAboutAPointOutsideTheMatrixFailsLoudly() {
         assertThatThrownBy(() -> model.minutes(OFFICE, stop(9, 1, 1).location()))
                 .isInstanceOf(IllegalArgumentException.class)

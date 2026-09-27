@@ -82,7 +82,7 @@ public final class ShiftPlan {
                 // The cab keeps its vehicle even if a smaller one would now do: it is already dispatched.
                 TravelEstimate estimate = travel.forPoints(points(office, remaining));
                 PlannedCab rebuilt = new RoutePlanner(estimate.model()).buildCab(office, cab.vehicle(), remaining, params);
-                result.add(toCab(cab.cabNumber(), rebuilt, estimate, office, params));
+                result.add(toCab(cab.cabNumber(), rebuilt, estimate, params));
             }
             // else: emptied by the cancellation, so it is dropped and the gap is not filled.
         }
@@ -114,10 +114,10 @@ public final class ShiftPlan {
         List<Cab> result = new ArrayList<>(cabs);
         if (insertion.opensNewCab()) {
             int next = cabs.stream().mapToInt(Cab::cabNumber).max().orElse(0) + 1;
-            result.add(toCab(next, insertion.cab(), estimate, office, params));
+            result.add(toCab(next, insertion.cab(), estimate, params));
         } else {
             Cab target = cabs.get(insertion.cabIndex());
-            result.set(insertion.cabIndex(), toCab(target.cabNumber(), insertion.cab(), estimate, office, params));
+            result.set(insertion.cabIndex(), toCab(target.cabNumber(), insertion.cab(), estimate, params));
         }
         return new ShiftPlan(office, params, travel, result);
     }
@@ -141,7 +141,7 @@ public final class ShiftPlan {
         List<Cab> result = new ArrayList<>(planned.size());
         int number = 1;
         for (PlannedCab pc : planned) {
-            result.add(toCab(number++, pc, estimate, office, params));
+            result.add(toCab(number++, pc, estimate, params));
         }
         return result;
     }
@@ -163,15 +163,13 @@ public final class ShiftPlan {
         }
         return new PlannedCab(cab.vehicle(), outward,
                 RouteMetrics.pathKm(estimate.model(), office, outward),
-                RouteMetrics.maxRideMinutes(estimate.model(), office, outward, params.dwellMinutes(), params.shift()),
+                Timetable.of(estimate.model(), office, outward, params.shift(), params.dwellMinutes()),
                 cab.escortRequired());
     }
 
     /** Turns a freshly planned or rebuilt cab into the record this plan stores. */
-    private static Cab toCab(int cabNumber, PlannedCab planned, TravelEstimate estimate, GeoPoint office,
-                             RoutingParams params) {
-        List<StopTiming> timings = EtaCalculator.compute(estimate.model(), office, planned.stops(),
-                params.shift(), params.dwellMinutes());
+    private static Cab toCab(int cabNumber, PlannedCab planned, TravelEstimate estimate, RoutingParams params) {
+        List<StopTiming> timings = planned.timetable().stopsInDrivingOrder();
         return new Cab(cabNumber, planned.vehicle(), timings, planned.distanceKm(), planned.maxRideMinutes(),
                 planned.escortRequired(), params.cost(planned), params.shift().officeTime(), estimate.source());
     }

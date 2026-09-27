@@ -83,7 +83,7 @@ public final class SweepClusterer {
                     List<Stop> candidate = new ArrayList<>(current);
                     candidate.add(next);
                     List<Stop> route = sequencer.sequence(office, candidate);
-                    double ride = RouteMetrics.maxRideMinutes(travel, office, route, params.dwellMinutes(), params.shift());
+                    double ride = Timetable.of(travel, office, route, params.shift(), params.dwellMinutes()).maxRideMinutes();
                     if (ride <= params.maxRideMinutes()) {
                         current = candidate;
                         currentRoute = route;
