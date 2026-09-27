@@ -3,7 +3,6 @@ package dev.dhyey.cabrouter.service;
 import dev.dhyey.cabrouter.api.dto.CreatePlanRequest;
 import dev.dhyey.cabrouter.api.dto.PlanResponse;
 import dev.dhyey.cabrouter.api.dto.VehicleSpec;
-import dev.dhyey.cabrouter.config.RoutingProperties;
 import dev.dhyey.cabrouter.domain.CabRoute;
 import dev.dhyey.cabrouter.domain.Employee;
 import dev.dhyey.cabrouter.domain.EmployeeRepository;
@@ -12,19 +11,16 @@ import dev.dhyey.cabrouter.domain.OfficeRepository;
 import dev.dhyey.cabrouter.domain.RoutePlan;
 import dev.dhyey.cabrouter.domain.RoutePlanRepository;
 import dev.dhyey.cabrouter.domain.RouteStop;
-import dev.dhyey.cabrouter.routing.Direction;
 import dev.dhyey.cabrouter.routing.Fleet;
 import dev.dhyey.cabrouter.routing.GeoPoint;
+import dev.dhyey.cabrouter.routing.PlanningPolicy;
 import dev.dhyey.cabrouter.routing.ReplanStrategy;
 import dev.dhyey.cabrouter.routing.RoutingParams;
-import dev.dhyey.cabrouter.routing.ShiftContext;
 import dev.dhyey.cabrouter.routing.ShiftPlan;
 import dev.dhyey.cabrouter.routing.Stop;
 import dev.dhyey.cabrouter.routing.StopTiming;
-import dev.dhyey.cabrouter.routing.TrafficProfile;
 import dev.dhyey.cabrouter.routing.TravelModelProvider;
 import dev.dhyey.cabrouter.routing.VehicleType;
-import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
@@ -48,17 +44,15 @@ public class PlanningService {
     private final EmployeeRepository employees;
     private final RoutePlanRepository plans;
     private final TravelModelProvider travelProvider;
-    private final TrafficProfile traffic;
-    private final RoutingProperties props;
+    private final PlanningPolicy policy;
 
     public PlanningService(OfficeRepository offices, EmployeeRepository employees, RoutePlanRepository plans,
-                           TravelModelProvider travelProvider, RoutingProperties props) {
+                           TravelModelProvider travelProvider, PlanningPolicy policy) {
         this.offices = offices;
         this.employees = employees;
         this.plans = plans;
         this.travelProvider = travelProvider;
-        this.traffic = new TrafficProfile(props.trafficHourlyFactors());
-        this.props = props;
+        this.policy = policy;
     }
 
     public PlanResponse create(CreatePlanRequest req) {
@@ -79,7 +73,7 @@ public class PlanningService {
             requireSameOffice(e, office);
         }
 
-        int maxRide = req.maxRideMinutes() != null ? req.maxRideMinutes() : props.defaultMaxRideMinutes();
+        int maxRide = policy.maxRideMinutesOr(req.maxRideMinutes());
         RoutePlan plan = new RoutePlan(office, req.shiftTime(), req.direction(), fleetOf(req), maxRide);
 
         List<Stop> stops = req.employeeIds().stream().map(id -> toStop(staff.get(id))).toList();
@@ -97,7 +91,8 @@ public class PlanningService {
     /** An employee cancels. LOCAL keeps every other cab exactly as issued. */
     public PlanResponse cancel(long planId, long employeeId, ReplanStrategy strategy) {
         RoutePlan plan = load(planId);
-        ShiftPlan before = restore(plan);
+        RoutingParams params = params(plan);
+        ShiftPlan before = restore(plan, params);
         ShiftPlan after = before.cancel(employeeId, strategy);
         save(plan, before, after);
         plan.touch();
@@ -111,7 +106,8 @@ public class PlanningService {
                 .orElseThrow(() -> new NotFoundException("employee " + employeeId + " not found"));
         requireSameOffice(employee, plan.getOffice());
 
-        ShiftPlan before = restore(plan);
+        RoutingParams params = params(plan);
+        ShiftPlan before = restore(plan, params);
         ShiftPlan after = before.add(toStop(employee));
         save(plan, before, after);
         plan.touch();
@@ -121,7 +117,8 @@ public class PlanningService {
     /** Re-optimise everything, e.g. after several local repairs have drifted from optimal. */
     public PlanResponse replan(long planId) {
         RoutePlan plan = load(planId);
-        ShiftPlan before = restore(plan);
+        RoutingParams params = params(plan);
+        ShiftPlan before = restore(plan, params);
         ShiftPlan after = before.replan();
         save(plan, before, after);
         plan.touch();
@@ -129,9 +126,9 @@ public class PlanningService {
     }
 
     /** Rebuilds the routing view of a stored plan. Stored stops are in driving order. */
-    private ShiftPlan restore(RoutePlan plan) {
+    private ShiftPlan restore(RoutePlan plan, RoutingParams params) {
         List<ShiftPlan.Cab> cabs = plan.getCabs().stream().map(c -> toCab(plan, c)).toList();
-        return ShiftPlan.restore(plan.getOffice().location(), params(plan), travelProvider, cabs);
+        return ShiftPlan.restore(plan.getOffice().location(), params, travelProvider, cabs);
     }
 
     private ShiftPlan.Cab toCab(RoutePlan plan, CabRoute cab) {
@@ -185,15 +182,7 @@ public class PlanningService {
     }
 
     private RoutingParams params(RoutePlan plan) {
-        return new RoutingParams(
-                plan.fleet(),
-                plan.getMaxRideMinutes(),
-                props.dwellMinutes(),
-                new ShiftContext(plan.getDirection(), officeTime(plan), props.nightStartHour(), props.nightEndHour(),
-                        traffic),
-                props.escortDetourTolerance(),
-                props.sweepStarts(),
-                props.escortCost());
+        return policy.paramsFor(plan.getDirection(), plan.getShiftTime(), plan.fleet(), plan.getMaxRideMinutes());
     }
 
     private Fleet fleetOf(CreatePlanRequest req) {
@@ -201,8 +190,7 @@ public class PlanningService {
             throw new InvalidRequestException("give either cabCapacity or fleet, not both");
         }
         if (req.fleet() == null || req.fleet().isEmpty()) {
-            int seats = req.cabCapacity() != null ? req.cabCapacity() : props.defaultCabCapacity();
-            return Fleet.unlimited("CAB", seats);
+            return policy.defaultFleet(req.cabCapacity());
         }
         try {
             return new Fleet(req.fleet().stream()
@@ -213,12 +201,6 @@ public class PlanningService {
         } catch (IllegalArgumentException e) {
             throw new InvalidRequestException(e.getMessage());
         }
-    }
-
-    private LocalDateTime officeTime(RoutePlan plan) {
-        return plan.getDirection() == Direction.PICKUP
-                ? plan.getShiftTime().minusMinutes(props.arrivalBufferMinutes())
-                : plan.getShiftTime().plusMinutes(props.departureBufferMinutes());
     }
 
     private RoutePlan load(long planId) {

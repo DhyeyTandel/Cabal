@@ -411,6 +411,8 @@ timed with the traffic at the hour it is driven.
 routing/   the algorithm: plain Java, no Spring, unit-tested in isolation
   ShiftPlan: the plan-editing module (create, cancel, add, replan); the rest of
   routing/ sits behind it
+  PlanningPolicy: turns configuration into the settings for one plan (office time,
+  night window, traffic, defaults), built once at startup
   SweepClusterer, StopSequencer, InterRouteImprover, RoutePlanner, Timetable,
   Fleet, FleetInventory, ShiftContext, TrafficProfile, TravelModel (+ HaversineTravelModel,
   MatrixTravelModel), RouteMetrics, value records
@@ -420,7 +422,8 @@ domain/    JPA entities (Office, Employee, RoutePlan + PlanVehicleType, CabRoute
            RouteStop) and repositories
 service/   PlanningService (loads entities, calls ShiftPlan, saves changed cabs), DirectoryService
 api/       REST controllers, request/response records, problem-detail error mapping
-config/    RoutingProperties (all tunables in application.properties)
+config/    RoutingProperties (all tunables in application.properties), read only here to
+           build PlanningPolicy and the travel-model provider
 db/migration/   schema, owned by Flyway; Hibernate only validates it
   V1__init.sql          initial schema
   V2__mixed_fleet.sql   adds fleets and migrates existing plans in place
