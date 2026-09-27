@@ -1,0 +1,474 @@
+/* Cabal demo site. Warm editorial design system: cream paper, one signal orange,
+   serif display over a confident sans, square cards, pill buttons, springy motion. */
+
+:root {
+  --paper: #F4F0E9;
+  --paper-lift: #FCFAF6;
+  --card: #FFFFFF;
+  --ink: #17140F;
+  --ink-soft: #2B2620;
+  --body-color: #4B443A;
+  --muted: #7C7367;
+  --muted-soft: #A89E90;
+  --faint: #E6DFD2;
+  --faint-soft: #EFEAE0;
+  --accent: #EE5308;
+  --accent-deep: #C24303;
+  --accent-soft: #FBE6D9;
+  --magenta: #DE3D9E;
+  --magenta-soft: #FBE2F1;
+  --ink-surface: #17140F;
+  --on-ink: #F4F0E9;
+  --on-ink-muted: #A89E90;
+  --r-card: 4px;
+  --r-input: 8px;
+  --r-media: 24px;
+  --r-pill: 999px;
+  --shadow-lift: 0 8px 16px rgba(23, 20, 15, .06), 0 32px 64px rgba(23, 20, 15, .12);
+  --ease-spring: cubic-bezier(.34, 1.56, .64, 1);
+  --ease-swift: cubic-bezier(.2, .7, .2, 1);
+  --dur-fast: .18s;
+  --dur: .32s;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #17140F;
+    --paper-lift: #1E1912;
+    --card: #201B13;
+    --ink: #F4F0E9;
+    --ink-soft: #EFEAE0;
+    --body-color: #C9C0B2;
+    --muted: #A89E90;
+    --muted-soft: #6E6455;
+    --faint: #332D23;
+    --faint-soft: #2A2519;
+    --accent-soft: #3A2313;
+    --accent-deep: #FF8A4D;
+    --magenta-soft: #3A1C2E;
+    --ink-surface: #0F0C08;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--paper);
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--body-color);
+  font-family: "Sofia Sans", system-ui, sans-serif;
+  font-weight: 450;
+  font-size: 16.5px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3 {
+  font-family: "Newsreader", Georgia, serif;
+  font-weight: 400;
+  color: var(--ink);
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+em {
+  color: var(--accent);
+  font-style: italic;
+}
+
+a {
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--faint);
+  text-underline-offset: 3px;
+  transition: color var(--dur-fast) var(--ease-swift);
+}
+
+a:hover {
+  color: var(--accent);
+}
+
+.page {
+  max-width: 1160px;
+  margin: 0 auto;
+  padding: 0 40px;
+}
+
+@media (max-width: 640px) {
+  .page {
+    padding: 0 16px;
+  }
+}
+
+/* Eyebrow */
+
+.eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 20px;
+}
+
+.eyebrow-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: none;
+}
+
+/* Header */
+
+.site-header {
+  padding: 64px 0 48px;
+}
+
+.display-hero {
+  font-size: clamp(40px, 6vw, 64px);
+  line-height: 1.05;
+  margin-bottom: 20px;
+}
+
+.lede {
+  max-width: 560px;
+  color: var(--muted);
+  font-size: 17px;
+  margin: 0;
+}
+
+/* Plan picker */
+
+.pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0 0 40px;
+}
+
+.plan-pill {
+  font-family: "Sofia Sans", system-ui, sans-serif;
+  font-weight: 560;
+  font-size: 14px;
+  color: var(--ink-soft);
+  background: var(--card);
+  border: 1px solid var(--faint);
+  border-radius: var(--r-pill);
+  padding: 9px 18px;
+  cursor: pointer;
+  transition: transform var(--dur) var(--ease-spring), box-shadow var(--dur) var(--ease-spring),
+    background var(--dur-fast) var(--ease-swift), color var(--dur-fast) var(--ease-swift),
+    border-color var(--dur-fast) var(--ease-swift);
+}
+
+.plan-pill:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lift);
+}
+
+.plan-pill:active {
+  transform: scale(.97);
+}
+
+.plan-pill[aria-pressed="true"] {
+  background: var(--ink);
+  border-color: var(--ink);
+  /* --paper, not --on-ink: --ink flips in dark mode, so the text has to flip with it. */
+  color: var(--paper);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .plan-pill, .cab-card, .cab-card__stop {
+    transition: none !important;
+  }
+}
+
+/* State messages */
+
+.state-message {
+  color: var(--muted);
+  font-size: 16px;
+  padding: 32px 0;
+}
+
+.state-message--error {
+  color: var(--accent-deep);
+}
+
+/* Plan detail layout */
+
+.plan-detail {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 24px;
+  padding-bottom: 96px;
+}
+
+@media (max-width: 860px) {
+  .plan-detail {
+    grid-template-columns: 1fr;
+  }
+}
+
+.detail-main {
+  min-width: 0;
+}
+
+/* Summary metrics */
+
+.summary-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 28px;
+  margin: 0 0 20px;
+  padding: 20px 24px;
+  background: var(--card);
+  border: 1px solid var(--faint);
+  border-radius: var(--r-card);
+}
+
+.summary-bar > div {
+  margin: 0;
+}
+
+.summary-label {
+  display: block;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.summary-value {
+  display: block;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* Map */
+
+.map-frame {
+  border-radius: var(--r-media);
+  overflow: hidden;
+  border: 1px solid var(--faint);
+  background: var(--faint-soft);
+}
+
+#map {
+  height: 480px;
+  width: 100%;
+}
+
+@media (max-width: 640px) {
+  #map {
+    height: 340px;
+  }
+}
+
+.marker-office {
+  width: 14px;
+  height: 14px;
+  background: var(--ink);
+  border: 2px solid var(--paper-lift);
+  border-radius: 3px;
+  box-shadow: 0 1px 3px rgba(23, 20, 15, .3);
+}
+
+.marker-stop {
+  width: 9px;
+  height: 9px;
+  background: var(--muted-soft);
+  border: 1.5px solid var(--paper-lift);
+  border-radius: 50%;
+  box-shadow: 0 1px 2px rgba(23, 20, 15, .25);
+}
+
+.map-popup {
+  font-family: "Sofia Sans", system-ui, sans-serif;
+  font-size: 13.5px;
+  color: var(--ink-soft);
+}
+
+.map-popup strong {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.map-popup .map-popup__eta {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* Cab list */
+
+.cab-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.cab-card {
+  background: var(--card);
+  border: 1px solid var(--faint);
+  border-radius: var(--r-card);
+  padding: 16px 18px;
+  cursor: pointer;
+  transition: transform var(--dur) var(--ease-spring), box-shadow var(--dur) var(--ease-spring),
+    border-color var(--dur-fast) var(--ease-swift);
+}
+
+.cab-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lift);
+}
+
+.cab-card[aria-expanded="true"] {
+  border-color: var(--accent);
+}
+
+.cab-card__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cab-card__title {
+  font-family: "Newsreader", Georgia, serif;
+  font-size: 20px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.cab-card__vehicle {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.cab-card__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 8px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.cab-card__stats strong {
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+
+.escort-chip {
+  display: inline-block;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--accent-deep);
+  background: var(--accent-soft);
+  border-radius: var(--r-pill);
+  padding: 3px 9px;
+  margin-top: 10px;
+}
+
+.cab-card__stops {
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--faint);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cab-card__stop {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 14px;
+  color: var(--body-color);
+}
+
+.cab-card__stop-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cab-card__stop-eta {
+  flex: none;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* Footer: the one dark ink-surface band on the page */
+
+.site-footer {
+  background: var(--ink-surface);
+  color: var(--on-ink);
+  margin: 0 calc(-1 * max(40px, (100vw - 1160px) / 2 + 40px));
+  padding: 40px max(40px, (100vw - 1160px) / 2 + 40px);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.footer-credit {
+  margin: 0;
+  color: var(--on-ink);
+}
+
+.footer-link {
+  color: var(--on-ink-muted);
+  text-decoration: none;
+  font-weight: 560;
+}
+
+.footer-link:hover {
+  color: var(--accent);
+}
+
+@media (max-width: 640px) {
+  .site-footer {
+    margin: 0 -16px;
+    padding: 32px 16px;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+/* OpenStreetMap tiles are bright and saturated; tone them into the cream palette so the
+   routes carry the colour. Dark mode inverts them to a warm near-black. */
+#map .leaflet-tile-pane {
+  filter: grayscale(1) sepia(.18) brightness(1.03) contrast(.92);
+}
+@media (prefers-color-scheme: dark) {
+  #map .leaflet-tile-pane {
+    filter: invert(1) grayscale(1) sepia(.25) brightness(.82) contrast(.9);
+  }
+}

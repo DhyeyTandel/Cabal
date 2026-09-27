@@ -12,7 +12,7 @@ class PlanningPolicyTest {
 
     /** Arrival buffer 15, departure buffer 10: distinct, so a swap between them would fail. */
     private static PlanningPolicy policy() {
-        return new PlanningPolicy(2, 15, 10, 20, 7, TrafficProfile.flat(1.0), 0.25, 48, 100, 4, 60);
+        return new PlanningPolicy(2, 15, 10, 20, 7, TrafficProfile.flat(1.0), 0.25, 48, 100, 4, 60, 2000);
     }
 
     @Test
@@ -29,7 +29,7 @@ class PlanningPolicyTest {
     @Test
     void paramsForPassesThroughEveryValue() {
         TrafficProfile traffic = TrafficProfile.flat(1.5);
-        PlanningPolicy policy = new PlanningPolicy(3, 15, 10, 22, 6, traffic, 0.3, 12, 250, 4, 60);
+        PlanningPolicy policy = new PlanningPolicy(3, 15, 10, 22, 6, traffic, 0.3, 12, 250, 4, 60, 2000);
         Fleet fleet = Fleet.unlimited("CAB", 6);
 
         RoutingParams params = policy.paramsFor(Direction.DROP, SHIFT_TIME, fleet, 45);
@@ -79,14 +79,27 @@ class PlanningPolicyTest {
     }
 
     @Test
+    void maxRidersPerPlanReturnsTheConfiguredCap() {
+        PlanningPolicy policy = policy();
+
+        assertThat(policy.maxRidersPerPlan()).isEqualTo(2000);
+    }
+
+    @Test
     void rejectsANegativeBuffer() {
-        assertThatThrownBy(() -> new PlanningPolicy(2, -1, 10, 20, 7, TrafficProfile.flat(1.0), 0.25, 48, 100, 4, 60))
+        assertThatThrownBy(() -> new PlanningPolicy(2, -1, 10, 20, 7, TrafficProfile.flat(1.0), 0.25, 48, 100, 4, 60, 2000))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
     void rejectsAZeroDefaultCapacity() {
-        assertThatThrownBy(() -> new PlanningPolicy(2, 15, 10, 20, 7, TrafficProfile.flat(1.0), 0.25, 48, 100, 0, 60))
+        assertThatThrownBy(() -> new PlanningPolicy(2, 15, 10, 20, 7, TrafficProfile.flat(1.0), 0.25, 48, 100, 0, 60, 2000))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void rejectsAZeroMaxRidersPerPlan() {
+        assertThatThrownBy(() -> new PlanningPolicy(2, 15, 10, 20, 7, TrafficProfile.flat(1.0), 0.25, 48, 100, 4, 60, 0))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 }

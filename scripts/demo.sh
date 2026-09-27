@@ -1,11 +1,29 @@
 #!/usr/bin/env bash
 # Written for the bash 3.2 that ships with macOS (no negative indices; JSON built with jq).
 # Seeds one office and 24 employees across Bengaluru, plans a late-night drop with a
-# mixed fleet, cancels one rider, adds a late booking, then plans an early pickup. Requires the app on :8080 and jq.
+# mixed fleet, cancels one rider, adds a late booking, then plans an early pickup. Requires
+# the app on :8080 and jq. Talks to the API at $API (default http://localhost:8080/api); if
+# the server has cabal.api-key set, export API_KEY with the same value so writes are accepted
+# -- reads work either way, and the script runs unchanged when API_KEY is unset.
 set -euo pipefail
 API=${API:-http://localhost:8080/api}
+API_KEY=${API_KEY:-}
 
-post() { curl -sf -X POST "$API$1" -H 'Content-Type: application/json' ${2:+-d "$2"}; }
+post() {
+  if [ -n "$API_KEY" ]; then
+    curl -sf -X POST "$API$1" -H 'Content-Type: application/json' -H "X-API-Key: $API_KEY" ${2:+-d "$2"}
+  else
+    curl -sf -X POST "$API$1" -H 'Content-Type: application/json' ${2:+-d "$2"}
+  fi
+}
+
+del() {
+  if [ -n "$API_KEY" ]; then
+    curl -sf -X DELETE "$API$1" -H "X-API-Key: $API_KEY"
+  else
+    curl -sf -X DELETE "$API$1"
+  fi
+}
 
 office=$(post /offices '{"name":"Manyata Tech Park","latitude":13.0475,"longitude":77.6206}' | jq .id)
 echo "office $office"
@@ -64,7 +82,7 @@ echo "$plan" | jq -r "$summary"
 pid=$(echo "$plan" | jq .id)
 
 echo; echo "== ${homes[1]%% *} cancels (LOCAL repair) =="
-curl -sf -X DELETE "$API/plans/$pid/employees/${ids[1]}" | jq -r "$summary"
+del "/plans/$pid/employees/${ids[1]}" | jq -r "$summary"
 
 echo; echo "== late booking: ${homes[23]%% *} =="
 post "/plans/$pid/employees/$late" | jq -r "$summary"

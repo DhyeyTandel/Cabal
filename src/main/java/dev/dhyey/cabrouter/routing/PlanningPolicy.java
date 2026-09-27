@@ -21,11 +21,12 @@ public final class PlanningPolicy {
     private final double escortCost;
     private final int defaultCabCapacity;
     private final int defaultMaxRideMinutes;
+    private final int maxRidersPerPlan;
 
     public PlanningPolicy(double dwellMinutes, int arrivalBufferMinutes, int departureBufferMinutes,
                           int nightStartHour, int nightEndHour, TrafficProfile traffic,
                           double escortDetourTolerance, int sweepStarts, double escortCost,
-                          int defaultCabCapacity, int defaultMaxRideMinutes) {
+                          int defaultCabCapacity, int defaultMaxRideMinutes, int maxRidersPerPlan) {
         if (arrivalBufferMinutes < 0 || departureBufferMinutes < 0) {
             throw new IllegalArgumentException("buffers cannot be negative");
         }
@@ -34,6 +35,9 @@ public final class PlanningPolicy {
         }
         if (defaultMaxRideMinutes <= 0) {
             throw new IllegalArgumentException("default max ride minutes must be positive");
+        }
+        if (maxRidersPerPlan <= 0) {
+            throw new IllegalArgumentException("max riders per plan must be positive");
         }
         if (traffic == null) {
             throw new IllegalArgumentException("a policy needs a traffic profile");
@@ -49,6 +53,7 @@ public final class PlanningPolicy {
         this.escortCost = escortCost;
         this.defaultCabCapacity = defaultCabCapacity;
         this.defaultMaxRideMinutes = defaultMaxRideMinutes;
+        this.maxRidersPerPlan = maxRidersPerPlan;
     }
 
     /**
@@ -73,5 +78,10 @@ public final class PlanningPolicy {
     /** The requested max ride, or the configured default when null. */
     public int maxRideMinutesOr(Integer requested) {
         return requested != null ? requested : defaultMaxRideMinutes;
+    }
+
+    /** The most riders a single plan may carry, from {@code routing.max-riders-per-plan}. */
+    public int maxRidersPerPlan() {
+        return maxRidersPerPlan;
     }
 }

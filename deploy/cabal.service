@@ -1,0 +1,64 @@
+# Cabal on the ThinkPad: installed to /etc/systemd/system/cabal.service by setup-server.sh.
+#
+# Kept deliberately light and fenced off, because it shares the machine with Immich:
+# - JVM: 256 MB heap cap, serial GC (least overhead on a small, mostly idle service),
+#   capped metaspace and code cache, 2 JIT threads. Measured at roughly 250 to 300 MB.
+# - cgroup: MemoryMax is a hard ceiling for the whole process, JVM overhead included;
+#   CPUWeight below the default means Immich wins whenever both are busy.
+# - It only listens on 127.0.0.1 (see application-prod.properties); the Cloudflare
+#   tunnel is the only way in from outside.
+
+[Unit]
+Description=Cabal employee cab routing service
+After=network-online.target postgresql.service
+Wants=network-online.target postgresql.service
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=cabal
+Group=cabal
+WorkingDirectory=/opt/cabal
+EnvironmentFile=/etc/cabal/cabal.env
+ExecStart=/usr/bin/java \
+    -Xmx256m -Xss512k \
+    -XX:+UseSerialGC \
+    -XX:MaxMetaspaceSize=128m \
+    -XX:ReservedCodeCacheSize=64m \
+    -XX:CICompilerCount=2 \
+    -XX:+ExitOnOutOfMemoryError \
+    -jar /opt/cabal/cabal.jar \
+    --spring.profiles.active=prod
+SuccessExitStatus=143
+Restart=on-failure
+RestartSec=5
+
+# Resource limits
+MemoryMax=512M
+CPUWeight=50
+Nice=5
+TasksMax=128
+
+# Hardening: the app needs to read its jar, talk to Postgres on localhost and log to the journal
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

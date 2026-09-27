@@ -2,6 +2,7 @@ package dev.dhyey.cabrouter.service;
 
 import dev.dhyey.cabrouter.api.dto.CreatePlanRequest;
 import dev.dhyey.cabrouter.api.dto.PlanResponse;
+import dev.dhyey.cabrouter.api.dto.PlanSummary;
 import dev.dhyey.cabrouter.api.dto.VehicleSpec;
 import dev.dhyey.cabrouter.domain.CabRoute;
 import dev.dhyey.cabrouter.domain.Employee;
@@ -56,6 +57,9 @@ public class PlanningService {
     }
 
     public PlanResponse create(CreatePlanRequest req) {
+        if (req.employeeIds().size() > policy.maxRidersPerPlan()) {
+            throw new InvalidRequestException("a plan can have at most " + policy.maxRidersPerPlan() + " riders");
+        }
         Office office = offices.findById(req.officeId())
                 .orElseThrow(() -> new NotFoundException("office " + req.officeId() + " not found"));
 
@@ -88,6 +92,12 @@ public class PlanningService {
         return PlanResponse.from(load(planId));
     }
 
+    /** Newest first, at most 50, for the website's plan list. */
+    @Transactional(readOnly = true)
+    public List<PlanSummary> list() {
+        return plans.findTop50ByOrderByIdDesc().stream().map(PlanSummary::from).toList();
+    }
+
     /** An employee cancels. LOCAL keeps every other cab exactly as issued. */
     public PlanResponse cancel(long planId, long employeeId, ReplanStrategy strategy) {
         RoutePlan plan = load(planId);
@@ -102,6 +112,9 @@ public class PlanningService {
     /** A late booking. The employee goes into whichever cab absorbs them most cheaply. */
     public PlanResponse add(long planId, long employeeId) {
         RoutePlan plan = load(planId);
+        if (riderCount(plan) >= policy.maxRidersPerPlan()) {
+            throw new InvalidRequestException("a plan can have at most " + policy.maxRidersPerPlan() + " riders");
+        }
         Employee employee = employees.findById(employeeId)
                 .orElseThrow(() -> new NotFoundException("employee " + employeeId + " not found"));
         requireSameOffice(employee, plan.getOffice());
@@ -205,6 +218,10 @@ public class PlanningService {
 
     private RoutePlan load(long planId) {
         return plans.findById(planId).orElseThrow(() -> new NotFoundException("plan " + planId + " not found"));
+    }
+
+    private static int riderCount(RoutePlan plan) {
+        return plan.getCabs().stream().mapToInt(c -> c.getStops().size()).sum();
     }
 
     private static Stop toStop(Employee e) {

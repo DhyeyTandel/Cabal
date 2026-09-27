@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cabal</title>
+<meta name="description" content="Cabal: a routing engine that groups employees into cabs, orders the stops and times every pickup. Live demo plans.">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,wght@0,300..500;1,300..500&family=Sofia+Sans:wght@400..700&family=JetBrains+Mono:wght@400;600&display=swap">
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" integrity="sha384-c6Rcwz4e4CITMbu/NBmnNS8yN2sC3cUElMEMfP3vqqKFp7GOYaaBBCqmaWBjmkjb" crossorigin="anonymous" referrerpolicy="no-referrer">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" integrity="sha384-NElt3Op+9NBMCYaef5HxeJmU4Xeard/Lku8ek6hoPTvYkQPh3zLIrJP7KiRocsxO" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+
+<div class="page">
+
+  <header class="site-header">
+    <p class="eyebrow"><span class="eyebrow-dot"></span>Cabal / live demo</p>
+    <h1 class="display-hero">Cabs, <em>routed</em>.</h1>
+    <p class="lede">I built a routing engine that groups employees into cabs, orders the stops and
+      times every pickup. This is a live plan it made.</p>
+  </header>
+
+  <main>
+    <nav class="pill-row" id="plan-pills" aria-label="Plans"></nav>
+
+    <p class="state-message" id="state-message" hidden></p>
+
+    <section class="plan-detail" id="plan-detail" hidden>
+      <div class="detail-main">
+        <dl class="summary-bar" id="summary-bar"></dl>
+        <div class="map-frame">
+          <div id="map"></div>
+        </div>
+      </div>
+      <aside class="cab-list" id="cab-list" aria-label="Cabs"></aside>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <p class="footer-credit">Built by Dhyey Tandel</p>
+    <a class="footer-link" href="https://github.com/DhyeyTandel/Cabal">Source on GitHub &#8599;</a>
+  </footer>
+
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

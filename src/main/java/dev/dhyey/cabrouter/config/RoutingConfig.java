@@ -42,6 +42,7 @@ public class RoutingConfig {
                 props.sweepStarts(),
                 props.escortCost(),
                 props.defaultCabCapacity(),
-                props.defaultMaxRideMinutes());
+                props.defaultMaxRideMinutes(),
+                props.maxRidersPerPlan());
     }
 }

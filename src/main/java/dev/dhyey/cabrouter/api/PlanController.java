@@ -2,10 +2,12 @@ package dev.dhyey.cabrouter.api;
 
 import dev.dhyey.cabrouter.api.dto.CreatePlanRequest;
 import dev.dhyey.cabrouter.api.dto.PlanResponse;
+import dev.dhyey.cabrouter.api.dto.PlanSummary;
 import dev.dhyey.cabrouter.routing.ReplanStrategy;
 import dev.dhyey.cabrouter.service.PlanningService;
 import jakarta.validation.Valid;
 import java.net.URI;
+import java.util.List;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -35,6 +37,12 @@ public class PlanController {
     @GetMapping("/{id}")
     public PlanResponse get(@PathVariable long id) {
         return planning.get(id);
+    }
+
+    /** Newest first, at most 50; what the website's plan picker lists. */
+    @GetMapping
+    public List<PlanSummary> list() {
+        return planning.list();
     }
 
     /** Cancellation. {@code strategy=LOCAL} (default) touches only the affected cab. */

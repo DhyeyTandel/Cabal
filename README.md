@@ -47,10 +47,15 @@ no database:
 | `POST` | `/api/employees` | Register an employee with home coordinates and gender |
 | `GET` | `/api/offices/{id}/employees` | List an office's employees |
 | `POST` | `/api/plans` | Plan a shift: `officeId`, `shiftTime`, `direction` (`PICKUP`/`DROP`), `employeeIds`, and optionally `fleet` (or the shorthand `cabCapacity`) and `maxRideMinutes` |
+| `GET` | `/api/plans` | The 50 newest plans, as summaries |
 | `GET` | `/api/plans/{id}` | Fetch a plan |
 | `DELETE` | `/api/plans/{id}/employees/{empId}?strategy=LOCAL\|FULL` | Cancellation |
 | `POST` | `/api/plans/{id}/employees/{empId}` | Late booking |
 | `POST` | `/api/plans/{id}/replan` | Re-optimise the whole plan from scratch |
+| `GET` | `/healthz` | Liveness plus a database check |
+
+When `CABAL_API_KEY` is set (always, in production), every request that changes data
+needs an `X-API-Key` header. Reads never do.
 
 A fleet lists vehicle types with their prices: a fixed charge per trip and a charge
 per km, in whatever currency you use. Omit `available` for as many as needed:
@@ -405,6 +410,64 @@ planning is about 4× faster on large shifts; plans minimise cost with per-vehic
 prices; late bookings can upgrade a full cab to a bigger free vehicle; and each leg is
 timed with the traffic at the hour it is driven.
 
+## Deployment
+
+It is set up to run at **https://cabal.dhyeytandel.in** on a home server: a ThinkPad
+P51 on Ubuntu 26.04, reached through a Cloudflare Tunnel. The page at `/` is a read-only
+map of the demo plans; anyone can read the API, and only the API key holder can change
+anything.
+
+```bash
+deploy/deploy.sh --setup --seed   # first time: Java, PostgreSQL, user, secrets, service, demo data
+deploy/deploy.sh                  # every release after that
+```
+
+`deploy.sh` builds and tests on the Mac, copies the jar to the server over SSH
+(Tailscale), restarts the service, and rolls back to the previous jar if the new one
+does not answer `/healthz` within 90 seconds. It asks for the server's sudo password
+once. Everything it installs lives in `deploy/`:
+
+| File | Runs on | What it does |
+|---|---|---|
+| `deploy.sh` | Mac | Build, test, upload, trigger install |
+| `setup-server.sh` | Server, once | Java, PostgreSQL, `cabal` user, database, secrets in `/etc/cabal/cabal.env`, systemd unit. Safe to rerun; keeps existing secrets |
+| `install-release.sh` | Server | Swap the jar, restart, health-check, roll back on failure, optional demo seed |
+| `cabal.service` | Server | The systemd unit |
+| `cloudflared-ingress.yml` | Server | The one tunnel rule to add |
+
+**Kept light.** Measured on this Mac with the demo plus a 500-rider plan:
+
+| JVM setup | Memory after load | 500-rider plan |
+|---|---|---|
+| Default | 362 MB, still growing | 0.5 s |
+| Production (`cabal.service`: 256 MB heap, serial GC, capped metaspace and code cache) | about 250 to 300 MB | 0.6 s |
+
+On the server, systemd caps the whole process at 512 MB (`MemoryMax`) and gives it a
+lower CPU weight than everything else, so it cannot starve the other services sharing
+the machine. The database pool is 5 connections and Tomcat 20 threads.
+
+**Safe to expose.**
+- The app listens on `127.0.0.1` only. The Cloudflare Tunnel is the only way in, so no
+  router port is open and the home IP is not published.
+- Every request that could change data (any method other than GET, HEAD or OPTIONS,
+  on any path) needs `X-API-Key`. The check is deliberately not a path prefix: the raw
+  request URI can differ from the path Spring routes on, and `/%61pi/offices` really
+  does reach `/api/offices`. Tested against the real server.
+- A plan can hold at most 300 riders in production, so no single request can tie up
+  the CPU (2,000 riders take about 12 s).
+- The page inserts all API data with `textContent`, never `innerHTML`. Leaflet is
+  pinned with subresource integrity hashes.
+- The service runs as a no-login `cabal` user under systemd sandboxing (read-only
+  system, no home access, no new privileges, no capabilities).
+
+**What else is on the machine.** Immich (a private photo server) shares the ThinkPad.
+It stays Tailscale-only and is never routed through the tunnel; setup never touches it
+or its containers.
+
+OSRM is off in production: the straight-line model needs no extra memory. It can be
+switched on later with `TRAVEL_MODEL=osrm` and a self-hosted OSRM (see
+[Travel times](#travel-times-haversine-or-osrm)).
+
 ## Code layout
 
 ```
@@ -426,6 +489,7 @@ service/   PlanningService (loads entities, calls ShiftPlan, saves changed cabs)
 api/       REST controllers, request/response records, problem-detail error mapping
 config/    RoutingProperties (all tunables in application.properties), read only here to
            build PlanningPolicy and the travel-model provider
+static/    the read-only demo page: index.html, app.css, app.js (Leaflet map)
 db/migration/   schema, owned by Flyway; Hibernate only validates it
   V1__init.sql          initial schema
   V2__mixed_fleet.sql   adds fleets and migrates existing plans in place

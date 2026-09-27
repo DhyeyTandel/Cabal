@@ -197,3 +197,75 @@ matched the baseline, and planning time stayed within noise (1,000 riders: 3.84 
 4.31 s over two runs; 2,000: 12.5 s and 12.8 s).
 
 **Scale/limits** — Unchanged.
+
+## [2026-09-28] Make Cabal deployable on the ThinkPad behind a Cloudflare Tunnel
+
+**Problem** — The user wants Cabal live as a website on their home server (ThinkPad
+P51, Ubuntu 26.04, 14 GB RAM, shared with Immich) without it being heavy. The app had
+no web page, no protection for writes, no production settings and no deployment path,
+and anyone reaching a public copy could have created 2,000-rider plans at about 12 s
+of CPU each.
+
+**Options considered**
+- Docker Compose with a reverse proxy. Rejected: the Docker daemon's own overhead, and
+  Docker is not installed on the Mac, so the setup could not be tested here. Plain
+  systemd plus an apt PostgreSQL could be syntax-checked locally and matched the
+  server's existing systemd use.
+- Port forwarding on the home router. Rejected: Indian home broadband is usually
+  behind carrier-grade NAT, and it would expose the home IP. The user already runs a
+  Cloudflare Tunnel, so a hostname ingress rule was chosen.
+- Self-hosting OSRM, now that RAM is plentiful. Deferred: several GB and extra moving
+  parts before the demo needs real road times.
+- JVM setups, all measured on the Mac with the demo plus a 500-rider plan: default
+  (362 MB and growing, 0.5 s), 192 MB heap (289 MB, 0.7 s), lean 128 MB heap (220 MB,
+  0.6 s), lean with the C1 compiler only (171 MB, 0.7 s). The user chose a 256 MB heap
+  with the full JIT, as a margin for large plans at a still-small footprint.
+
+**Decision**
+- `deploy/`: a hardened `cabal.service` (256 MB heap, serial GC, `MemoryMax=512M`,
+  `CPUWeight=50`, systemd sandboxing), an idempotent `setup-server.sh`, an
+  `install-release.sh` that health-checks and rolls back, a Mac-side `deploy.sh`, and
+  the single tunnel rule for `cabal.dhyeytandel.in`.
+- A `prod` profile: bind to 127.0.0.1, small Tomcat and Hikari pools, graceful
+  shutdown, compression, a 300-rider cap, and a required API key.
+- An API key filter on every non-read request, `/healthz`, `GET /api/plans`, and a
+  read-only Leaflet map page in the owner's design system.
+- Immich is never routed through the tunnel and setup never touches it.
+- The app side was built by a Sonnet worker from a spec; the server side was written
+  by the orchestrator because it runs as root on the user's machine.
+
+**Tradeoff accepted**
+- The site is only up while the laptop is on and online.
+- Deploys need the server's sudo password, so the user runs them; the assistant cannot.
+- Static files revalidate on every page load (a 304 when unchanged) instead of being
+  cached, trading a round trip for never serving stale JavaScript after a deploy.
+- The map depends on OpenStreetMap's public tile servers, which are fine for light
+  demo traffic under their usage policy but not for heavy use.
+
+**What went wrong**
+- The worker's filter checked `request.getRequestURI().startsWith("/api/")`. Against
+  the real Tomcat, `POST /%61pi/offices` with the key returned 201, which proves that
+  path routes to `/api/offices`; the raw URI does not start with `/api/`, so without a
+  key the old filter would have let that write through. Fixed by requiring the key for
+  every non-read method on any path. Afterwards all six path variants tried without a
+  key returned 401, and a regression test was added. MockMvc could not have caught this.
+- The spec told the worker to use CARTO Positron tiles. They now require an API key,
+  and the page showed "API KEY REQUIRED" tiles. Switched to OpenStreetMap's own tiles
+  with a CSS filter to match the palette.
+- The selected plan pill was blank in dark mode: its text used `--on-ink`, which does
+  not flip with the theme while its background (`--ink`) does. Fixed with `--paper`.
+- The prod profile cached static files for an hour, which would have served old
+  JavaScript after each deploy. Switched to revalidation.
+- During testing, a loop variable named `path` wiped the zsh command path (in zsh,
+  `path` is tied to `PATH`), so the first bypass run printed only
+  "command not found: curl". The run was repeated with a different name.
+- A stale health check hit the previous app while it was still draining under graceful
+  shutdown, so it briefly looked as if the new cache settings had not applied.
+- Earlier, while inspecting the report for the architecture review, `preview_start`
+  launched an unrelated project's server (recorded in the ShiftPlan entry).
+
+**Scale/limits**
+- About 250 to 300 MB for the app plus PostgreSQL's own memory, capped at 512 MB by
+  systemd.
+- 300 riders per plan in production. A 300-rider plan takes well under a second.
+- Tomcat serves 20 concurrent requests with 50 queued; Cloudflare absorbs the rest.

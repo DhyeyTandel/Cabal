@@ -18,6 +18,7 @@ public record RoutingProperties(
         double escortCost,
         int defaultCabCapacity,
         int defaultMaxRideMinutes,
+        int maxRidersPerPlan,
         TravelModelKind travelModel,
         Osrm osrm) {
 

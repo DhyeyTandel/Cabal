@@ -1,0 +1,17 @@
+# Cloudflare Tunnel rule for Cabal on the ThinkPad.
+#
+# Add the rule below under `ingress:` in the existing cloudflared config, ABOVE the final
+# catch-all (`- service: http_status:404`). Use the port setup-server.sh printed (8080
+# unless that was taken). Then point DNS at the tunnel and restart cloudflared:
+#
+#   cloudflared tunnel route dns <tunnel-name> cabal.dhyeytandel.in
+#   sudo systemctl restart cloudflared
+#
+# Only Cabal belongs here. Immich must never be routed through this or any public
+# tunnel: it stays Tailscale-only.
+
+ingress:
+  - hostname: cabal.dhyeytandel.in
+    service: http://127.0.0.1:8080
+  # ... other public hostnames, if any ...
+  - service: http_status:404
