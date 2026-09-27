@@ -164,3 +164,36 @@ hours have no such guard.
   worker ran no git commands, so there was no effect.
 
 **Scale/limits** — None: this runs once per request and is constant time.
+
+## [2026-09-27] Extract CabBuilder and drop the improver's callback seam
+
+**Problem** — `InterRouteImprover` rebuilt cabs through a
+`BiFunction<PlannedCab, List<Stop>, PlannedCab>` created as a lambda in
+`RoutePlanner.plan`. The seam had exactly one caller, so nothing varied across it, and
+"build a cab" (sequencing, the night escort repair and the timetable) sat inside
+`RoutePlanner` even though the improver needed it as much as the planner did.
+
+**Options considered**
+- Leave it. Rated "speculative" in the architecture review, and the least likely of
+  the four candidates to cause a real bug. The user chose to do it anyway.
+- Delete `InterRouteImprover` and fold it into the planner. Rejected by the deletion
+  test: it would move about 250 lines into `RoutePlanner` without removing any.
+- Extract a `CabBuilder` that both depend on directly. Chosen.
+
+**Decision** — Package-private `routing/CabBuilder`, with office and settings bound at
+construction and one method, `build(vehicle, stops)`. It holds the former
+`buildCab` body and `escortSafeRoute`, moved unchanged (a token-level comparison
+against the previous commit found both bodies identical). `RoutePlanner.buildCab`
+stays public as a one-line delegate, so `ShiftPlan` and the tests did not change. The
+planner and the improver each use one `CabBuilder` per operation. `RoutePlanner` went
+from 225 to 176 lines.
+
+**Tradeoff accepted** — One more class. `RoutePlanner.buildCab` now exists only as a
+public face for `ShiftPlan` and the tests; a reader has to follow it one step further
+to reach the logic.
+
+**What went wrong** — Nothing. 78 tests passed, all 114 demo times across 20 cab lines
+matched the baseline, and planning time stayed within noise (1,000 riders: 3.84 s and
+4.31 s over two runs; 2,000: 12.5 s and 12.8 s).
+
+**Scale/limits** — Unchanged.

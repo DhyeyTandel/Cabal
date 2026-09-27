@@ -413,6 +413,8 @@ routing/   the algorithm: plain Java, no Spring, unit-tested in isolation
   routing/ sits behind it
   PlanningPolicy: turns configuration into the settings for one plan (office time,
   night window, traffic, defaults), built once at startup
+  CabBuilder: builds one cab (sequence, night escort repair, timetable); used by
+  both the planner and the inter-route search
   SweepClusterer, StopSequencer, InterRouteImprover, RoutePlanner, Timetable,
   Fleet, FleetInventory, ShiftContext, TrafficProfile, TravelModel (+ HaversineTravelModel,
   MatrixTravelModel), RouteMetrics, value records

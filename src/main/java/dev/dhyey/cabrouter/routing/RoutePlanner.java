@@ -36,8 +36,8 @@ public final class RoutePlanner {
     /** @throws FleetExhaustedException if the fleet cannot seat everyone */
     public List<PlannedCab> plan(GeoPoint office, List<Stop> stops, RoutingParams params) {
         List<PlannedCab> swept = sweepOnly(office, stops, params);
-        List<PlannedCab> improved = new InterRouteImprover(
-                (cab, members) -> buildCab(office, cab.vehicle(), members, params)).improve(swept, params);
+        CabBuilder builder = new CabBuilder(travel, sequencer, office, params);
+        List<PlannedCab> improved = new InterRouteImprover(builder).improve(swept, params);
         return rightSize(improved, params.fleet());
     }
 
@@ -53,9 +53,10 @@ public final class RoutePlanner {
         // Sweep only checked that some vehicle fits each cluster; hand out the real ones here.
         List<Fleet.Entry> types = params.fleet().entries();
         VehicleType largest = types.get(types.size() - 1).type();
+        CabBuilder builder = new CabBuilder(travel, sequencer, office, params);
         List<PlannedCab> cabs = new ArrayList<>();
         for (List<Stop> cluster : clusters) {
-            cabs.add(buildCab(office, largest, cluster, params));
+            cabs.add(builder.build(largest, cluster));
         }
         return rightSize(cabs, params.fleet());
     }
@@ -91,61 +92,11 @@ public final class RoutePlanner {
     }
 
     /**
-     * Sequences one cab and applies the night escort rule. The rule looks at the stop
-     * farthest from the office (the first pickup, or the last drop). If the cab is there
-     * at night and that rider is escort-sensitive, we try ending the route at each other
-     * rider instead. We accept the cheapest reorder that stays within the detour
-     * tolerance and does not lengthen anyone's ride past the limit. If no reorder
-     * qualifies, the cab is flagged as needing a guard.
+     * Sequences one cab and applies the night escort rule. Delegates to {@link CabBuilder};
+     * see there for what the rule does.
      */
     public PlannedCab buildCab(GeoPoint office, VehicleType vehicle, List<Stop> stops, RoutingParams params) {
-        if (stops.isEmpty()) {
-            throw new IllegalArgumentException("a cab needs at least one stop");
-        }
-        if (stops.size() > vehicle.seats()) {
-            throw new IllegalArgumentException(
-                    vehicle.name() + " over capacity: " + stops.size() + " > " + vehicle.seats());
-        }
-        List<Stop> route = sequencer.sequence(office, stops);
-        Timetable timetable = Timetable.of(travel, office, route, params.shift(), params.dwellMinutes());
-        boolean escortRequired = false;
-
-        if (route.get(route.size() - 1).escortSensitive() && params.shift().isNight(timetable.farEndTime())) {
-            List<Stop> repaired = escortSafeRoute(office, stops, route, params);
-            if (repaired != null) {
-                route = repaired;
-                timetable = Timetable.of(travel, office, route, params.shift(), params.dwellMinutes());
-            } else {
-                escortRequired = true;
-            }
-        }
-        return new PlannedCab(vehicle, route, RouteMetrics.pathKm(travel, office, route), timetable, escortRequired);
-    }
-
-    private List<Stop> escortSafeRoute(GeoPoint office, List<Stop> stops, List<Stop> unconstrained, RoutingParams params) {
-        double baseKm = RouteMetrics.pathKm(travel, office, unconstrained);
-        double rideLimit = Math.max(params.maxRideMinutes(),
-                Timetable.of(travel, office, unconstrained, params.shift(), params.dwellMinutes()).maxRideMinutes());
-
-        List<Stop> best = null;
-        double bestKm = baseKm * (1 + params.escortDetourTolerance());
-        for (Stop anchor : stops) {
-            if (anchor.escortSensitive()) {
-                continue;
-            }
-            List<Stop> rest = new ArrayList<>(stops);
-            rest.remove(anchor);
-            List<Stop> candidate = new ArrayList<>(sequencer.sequence(office, rest, anchor.location()));
-            candidate.add(anchor);
-
-            double km = RouteMetrics.pathKm(travel, office, candidate);
-            double ride = Timetable.of(travel, office, candidate, params.shift(), params.dwellMinutes()).maxRideMinutes();
-            if (km <= bestKm + 1e-9 && ride <= rideLimit) {
-                best = candidate;
-                bestKm = km;
-            }
-        }
-        return best;
+        return new CabBuilder(travel, sequencer, office, params).build(vehicle, stops);
     }
 
     /**
@@ -169,6 +120,7 @@ public final class RoutePlanner {
             }
         }
         FleetInventory free = FleetInventory.after(params.fleet(), cabs);
+        CabBuilder builder = new CabBuilder(travel, sequencer, office, params);
         int bestIndex = -1;
         PlannedCab bestCab = null;
         double bestScore = Double.MAX_VALUE;
@@ -184,7 +136,7 @@ public final class RoutePlanner {
                 free.free().stream().filter(t -> t.seats() >= members.size()).forEach(vehicles::add);
             }
             for (VehicleType vehicle : vehicles) {
-                PlannedCab candidate = buildCab(office, vehicle, members, params);
+                PlannedCab candidate = builder.build(vehicle, members);
                 if (candidate.maxRideMinutes() > params.maxRideMinutes()) {
                     continue;
                 }
@@ -202,7 +154,7 @@ public final class RoutePlanner {
         double soloKm = RouteMetrics.pathKm(travel, office, List.of(stop));
         Optional<VehicleType> fresh = free.cheapestFitting(1, soloKm);
         if (fresh.isPresent()) {
-            PlannedCab solo = buildCab(office, fresh.get(), List.of(stop), params);
+            PlannedCab solo = builder.build(fresh.get(), List.of(stop));
             double score = params.cost(solo) + (solo.escortRequired() ? ESCORT_WORSENING_PENALTY : 0);
             if (score < bestScore) {
                 return new Insertion(-1, solo);

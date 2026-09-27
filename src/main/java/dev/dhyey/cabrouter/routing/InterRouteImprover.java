@@ -7,7 +7,6 @@ import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Set;
-import java.util.function.BiFunction;
 
 /**
  * Local search across cabs, run after the sweep. Sweep groups people by angle only, so
@@ -48,11 +47,11 @@ final class InterRouteImprover {
     /** A safety net only; searches normally run out of dirty cabs long before this. */
     private static final int MAX_PASSES = 500;
 
-    /** Rebuilds a cab, keeping its vehicle, with a new set of riders. */
-    private final BiFunction<PlannedCab, List<Stop>, PlannedCab> buildCab;
+    /** Sequences and times a cab's route for a new set of riders. */
+    private final CabBuilder builder;
 
-    InterRouteImprover(BiFunction<PlannedCab, List<Stop>, PlannedCab> buildCab) {
-        this.buildCab = buildCab;
+    InterRouteImprover(CabBuilder builder) {
+        this.builder = builder;
     }
 
     /**
@@ -148,8 +147,8 @@ final class InterRouteImprover {
                 continue;
             }
             List<Stop> srcRest = without(src.stops(), s);
-            PlannedCab newSrc = srcRest.isEmpty() ? null : buildCab.apply(src, srcRest);
-            PlannedCab newDst = buildCab.apply(dst, with(dst.stops(), s));
+            PlannedCab newSrc = srcRest.isEmpty() ? null : builder.build(src.vehicle(), srcRest);
+            PlannedCab newDst = builder.build(dst.vehicle(), with(dst.stops(), s));
             if (accept(src, dst, newSrc, newDst, params)) {
                 cabs.set(to, newDst);
                 if (newSrc == null) {
@@ -174,8 +173,8 @@ final class InterRouteImprover {
                 if (prune && !fitsBetterIn(s, centreA, centreB) && !fitsBetterIn(t, centreB, centreA)) {
                     continue;
                 }
-                PlannedCab na = buildCab.apply(ca, with(without(ca.stops(), s), t));
-                PlannedCab nb = buildCab.apply(cb, with(without(cb.stops(), t), s));
+                PlannedCab na = builder.build(ca.vehicle(), with(without(ca.stops(), s), t));
+                PlannedCab nb = builder.build(cb.vehicle(), with(without(cb.stops(), t), s));
                 if (accept(ca, cb, na, nb, params)) {
                     cabs.set(a, na);
                     cabs.set(b, nb);
