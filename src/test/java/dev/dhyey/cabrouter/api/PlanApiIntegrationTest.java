@@ -71,23 +71,13 @@ class PlanApiIntegrationTest {
                 .andExpect(jsonPath("$.cabs[0].travelSource").value("HAVERSINE"))
                 .andReturn();
         long planId = id(created);
-        String before = created.getResponse().getContentAsString();
 
-        // Cancel someone in the north group. Only their cab should change.
+        // Cancel someone in the north group. Only their cab should change (covered by ShiftPlanTest).
         long cancelled = employeeIds.get(1);
-        int cabOfCancelled = cabNumberOf(before, cancelled);
-        String after = mvc.perform(delete("/api/plans/{id}/employees/{emp}", planId, cancelled))
+        mvc.perform(delete("/api/plans/{id}/employees/{emp}", planId, cancelled))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.employeeCount").value(8))
-                .andExpect(jsonPath("$.revision").value(2))
-                .andReturn().getResponse().getContentAsString();
-
-        for (Map<String, Object> cab : cabs(before)) {
-            int number = (Integer) cab.get("cabNumber");
-            if (number != cabOfCancelled) {
-                assertThat(cabByNumber(after, number)).as("cab %d untouched", number).isEqualTo(cab);
-            }
-        }
+                .andExpect(jsonPath("$.revision").value(2));
 
         // Late booking: the east straggler not in the plan should take the free seat, not a new cab.
         long late = employeeIds.get(9);
@@ -183,19 +173,5 @@ class PlanApiIntegrationTest {
 
     private static List<Map<String, Object>> cabs(String plan) {
         return JsonPath.read(plan, "$.cabs");
-    }
-
-    private static Map<String, Object> cabByNumber(String plan, int number) {
-        return cabs(plan).stream().filter(c -> (Integer) c.get("cabNumber") == number).findFirst().orElseThrow();
-    }
-
-    private static int cabNumberOf(String plan, long employeeId) {
-        for (Map<String, Object> cab : cabs(plan)) {
-            List<Number> ids = JsonPath.read(cab, "$.stops[*].employeeId");
-            if (ids.stream().anyMatch(i -> i.longValue() == employeeId)) {
-                return (Integer) cab.get("cabNumber");
-            }
-        }
-        throw new AssertionError("employee " + employeeId + " not in plan");
     }
 }

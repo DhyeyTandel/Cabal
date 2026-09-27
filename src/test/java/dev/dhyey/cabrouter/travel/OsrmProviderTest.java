@@ -6,7 +6,9 @@ import static org.assertj.core.data.Offset.offset;
 
 import dev.dhyey.cabrouter.routing.GeoPoint;
 import dev.dhyey.cabrouter.routing.HaversineTravelModel;
+import dev.dhyey.cabrouter.routing.TravelEstimate;
 import dev.dhyey.cabrouter.routing.TravelModel;
+import dev.dhyey.cabrouter.routing.TravelSource;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;

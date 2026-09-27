@@ -4,7 +4,7 @@ import dev.dhyey.cabrouter.domain.CabRoute;
 import dev.dhyey.cabrouter.domain.RoutePlan;
 import dev.dhyey.cabrouter.domain.RouteStop;
 import dev.dhyey.cabrouter.routing.Direction;
-import dev.dhyey.cabrouter.travel.TravelSource;
+import dev.dhyey.cabrouter.routing.TravelSource;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;

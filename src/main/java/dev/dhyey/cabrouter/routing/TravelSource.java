@@ -1,4 +1,4 @@
-package dev.dhyey.cabrouter.travel;
+package dev.dhyey.cabrouter.routing;
 
 /** Which model timed a cab's route. Stored per cab and returned in the API. */
 public enum TravelSource {

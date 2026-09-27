@@ -1,7 +1,7 @@
 package dev.dhyey.cabrouter.domain;
 
+import dev.dhyey.cabrouter.routing.TravelSource;
 import dev.dhyey.cabrouter.routing.VehicleType;
-import dev.dhyey.cabrouter.travel.TravelSource;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;

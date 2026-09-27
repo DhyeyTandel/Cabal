@@ -92,7 +92,12 @@ public class RoutePlan {
 
     public CabRoute addCab() {
         int next = cabs.stream().mapToInt(CabRoute::getCabNumber).max().orElse(0) + 1;
-        CabRoute cab = new CabRoute(this, next);
+        return addCab(next);
+    }
+
+    /** Adds a cab with a specific number, e.g. one restored from a {@code ShiftPlan}. */
+    public CabRoute addCab(int cabNumber) {
+        CabRoute cab = new CabRoute(this, cabNumber);
         cabs.add(cab);
         return cab;
     }

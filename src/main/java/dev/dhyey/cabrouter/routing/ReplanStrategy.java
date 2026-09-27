@@ -1,4 +1,4 @@
-package dev.dhyey.cabrouter.service;
+package dev.dhyey.cabrouter.routing;
 
 public enum ReplanStrategy {
     /** Only the affected cab is re-sequenced. Every other driver's route stays as issued. */

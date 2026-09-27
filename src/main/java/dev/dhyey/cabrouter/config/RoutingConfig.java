@@ -1,10 +1,10 @@
 package dev.dhyey.cabrouter.config;
 
 import dev.dhyey.cabrouter.routing.HaversineTravelModel;
+import dev.dhyey.cabrouter.routing.TravelModelProvider;
 import dev.dhyey.cabrouter.travel.HaversineProvider;
 import dev.dhyey.cabrouter.travel.OsrmClient;
 import dev.dhyey.cabrouter.travel.OsrmProvider;
-import dev.dhyey.cabrouter.travel.TravelModelProvider;
 import java.time.Duration;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;

@@ -1,6 +1,5 @@
-package dev.dhyey.cabrouter.travel;
+package dev.dhyey.cabrouter.routing;
 
-import dev.dhyey.cabrouter.routing.GeoPoint;
 import java.util.Collection;
 
 /**

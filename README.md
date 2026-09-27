@@ -404,6 +404,8 @@ timed with the traffic at the hour it is driven.
 
 ```
 routing/   the algorithm: plain Java, no Spring, unit-tested in isolation
+  ShiftPlan: the plan-editing module (create, cancel, add, replan); the rest of
+  routing/ sits behind it
   SweepClusterer, StopSequencer, InterRouteImprover, RoutePlanner, EtaCalculator,
   Fleet, FleetInventory, ShiftContext, TrafficProfile, TravelModel (+ HaversineTravelModel,
   MatrixTravelModel), RouteMetrics, value records
@@ -411,7 +413,7 @@ travel/    where travel times come from: HaversineProvider, OsrmProvider + OsrmC
            (matrix fetching, chunking, fallback)
 domain/    JPA entities (Office, Employee, RoutePlan + PlanVehicleType, CabRoute,
            RouteStop) and repositories
-service/   PlanningService (entities to routing and back), DirectoryService
+service/   PlanningService (loads entities, calls ShiftPlan, saves changed cabs), DirectoryService
 api/       REST controllers, request/response records, problem-detail error mapping
 config/    RoutingProperties (all tunables in application.properties)
 db/migration/   schema, owned by Flyway; Hibernate only validates it
@@ -423,6 +425,10 @@ db/migration/   schema, owned by Flyway; Hibernate only validates it
 
 Other design choices worth knowing:
 
+- **Plan-editing rules live in the routing core.** `ShiftPlan` owns local vs full
+  re-planning, cab numbering, vehicle retention and driving order, and is tested in
+  milliseconds without HTTP or a database. `PlanningService` only loads, calls and
+  saves, writing just the cabs that changed.
 - **The routing core has no framework dependency.** It can be tested in milliseconds
   and lifted into a batch job or another service unchanged.
 - **Stops snapshot coordinates.** A route stop copies the employee's lat/lng, so moving

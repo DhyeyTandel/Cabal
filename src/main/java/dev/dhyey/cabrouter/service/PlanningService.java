@@ -2,6 +2,7 @@ package dev.dhyey.cabrouter.service;
 
 import dev.dhyey.cabrouter.api.dto.CreatePlanRequest;
 import dev.dhyey.cabrouter.api.dto.PlanResponse;
+import dev.dhyey.cabrouter.api.dto.VehicleSpec;
 import dev.dhyey.cabrouter.config.RoutingProperties;
 import dev.dhyey.cabrouter.domain.CabRoute;
 import dev.dhyey.cabrouter.domain.Employee;
@@ -12,25 +13,19 @@ import dev.dhyey.cabrouter.domain.RoutePlan;
 import dev.dhyey.cabrouter.domain.RoutePlanRepository;
 import dev.dhyey.cabrouter.domain.RouteStop;
 import dev.dhyey.cabrouter.routing.Direction;
-import dev.dhyey.cabrouter.api.dto.VehicleSpec;
-import dev.dhyey.cabrouter.routing.EtaCalculator;
 import dev.dhyey.cabrouter.routing.Fleet;
 import dev.dhyey.cabrouter.routing.GeoPoint;
-import dev.dhyey.cabrouter.routing.PlannedCab;
-import dev.dhyey.cabrouter.routing.RoutePlanner;
+import dev.dhyey.cabrouter.routing.ReplanStrategy;
 import dev.dhyey.cabrouter.routing.RoutingParams;
 import dev.dhyey.cabrouter.routing.ShiftContext;
+import dev.dhyey.cabrouter.routing.ShiftPlan;
 import dev.dhyey.cabrouter.routing.Stop;
 import dev.dhyey.cabrouter.routing.StopTiming;
 import dev.dhyey.cabrouter.routing.TrafficProfile;
-import dev.dhyey.cabrouter.routing.RouteMetrics;
-import dev.dhyey.cabrouter.travel.TravelEstimate;
-import dev.dhyey.cabrouter.travel.TravelModelProvider;
+import dev.dhyey.cabrouter.routing.TravelModelProvider;
 import dev.dhyey.cabrouter.routing.VehicleType;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -41,11 +36,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Glue between the JPA model and the routing core. It loads entities, turns them into
- * {@link Stop}s, calls {@link RoutePlanner}, and writes the result back as cabs and stops.
- *
- * <p>Every operation first fetches a travel model for exactly the points it will touch
- * (one OSRM table request when OSRM is on), then builds a planner over that model.
+ * Glue between the JPA model and the routing core. It loads entities, restores a
+ * {@link ShiftPlan} from them, asks the plan to do the actual editing, and writes back
+ * whichever cabs changed.
  */
 @Service
 @Transactional
@@ -90,7 +83,9 @@ public class PlanningService {
         RoutePlan plan = new RoutePlan(office, req.shiftTime(), req.direction(), fleetOf(req), maxRide);
 
         List<Stop> stops = req.employeeIds().stream().map(id -> toStop(staff.get(id))).toList();
-        rebuildAll(plan, stops);
+        RoutingParams params = params(plan);
+        ShiftPlan shiftPlan = ShiftPlan.create(office.location(), params, travelProvider, stops);
+        save(plan, ShiftPlan.restore(office.location(), params, travelProvider, List.of()), shiftPlan);
         return PlanResponse.from(plans.save(plan));
     }
 
@@ -102,24 +97,9 @@ public class PlanningService {
     /** An employee cancels. LOCAL keeps every other cab exactly as issued. */
     public PlanResponse cancel(long planId, long employeeId, ReplanStrategy strategy) {
         RoutePlan plan = load(planId);
-        CabRoute cab = plan.findCabOf(employeeId).orElseThrow(
-                () -> new NotFoundException("employee " + employeeId + " is not on plan " + planId));
-
-        if (strategy == ReplanStrategy.FULL) {
-            List<Stop> remaining = allStops(plan).stream().filter(s -> s.employeeId() != employeeId).toList();
-            rebuildAll(plan, remaining);
-        } else {
-            List<Stop> remaining = stopsOf(cab).stream().filter(s -> s.employeeId() != employeeId).toList();
-            if (remaining.isEmpty()) {
-                plan.getCabs().remove(cab);
-            } else {
-                Session session = session(plan, remaining);
-                // The cab keeps its vehicle even if a smaller one would now do: it is already dispatched.
-                PlannedCab rebuilt = session.planner().buildCab(
-                        plan.getOffice().location(), plan.vehicleNamed(cab.getVehicleType()), remaining, params(plan));
-                write(plan, cab, rebuilt, session);
-            }
-        }
+        ShiftPlan before = restore(plan);
+        ShiftPlan after = before.cancel(employeeId, strategy);
+        save(plan, before, after);
         plan.touch();
         return PlanResponse.from(plan);
     }
@@ -127,24 +107,13 @@ public class PlanningService {
     /** A late booking. The employee goes into whichever cab absorbs them most cheaply. */
     public PlanResponse add(long planId, long employeeId) {
         RoutePlan plan = load(planId);
-        if (plan.findCabOf(employeeId).isPresent()) {
-            throw new ConflictException("employee " + employeeId + " is already on plan " + planId);
-        }
         Employee employee = employees.findById(employeeId)
                 .orElseThrow(() -> new NotFoundException("employee " + employeeId + " not found"));
         requireSameOffice(employee, plan.getOffice());
 
-        Stop newcomer = toStop(employee);
-        List<Stop> everyone = new ArrayList<>(allStops(plan));
-        everyone.add(newcomer);
-        Session session = session(plan, everyone);
-
-        List<PlannedCab> current = plan.getCabs().stream().map(c -> toPlanned(plan, c, session)).toList();
-        RoutePlanner.Insertion insertion =
-                session.planner().bestInsertion(plan.getOffice().location(), current, newcomer, params(plan));
-
-        CabRoute target = insertion.opensNewCab() ? plan.addCab() : plan.getCabs().get(insertion.cabIndex());
-        write(plan, target, insertion.cab(), session);
+        ShiftPlan before = restore(plan);
+        ShiftPlan after = before.add(toStop(employee));
+        save(plan, before, after);
         plan.touch();
         return PlanResponse.from(plan);
     }
@@ -152,74 +121,67 @@ public class PlanningService {
     /** Re-optimise everything, e.g. after several local repairs have drifted from optimal. */
     public PlanResponse replan(long planId) {
         RoutePlan plan = load(planId);
-        rebuildAll(plan, allStops(plan));
+        ShiftPlan before = restore(plan);
+        ShiftPlan after = before.replan();
+        save(plan, before, after);
         plan.touch();
         return PlanResponse.from(plan);
     }
 
-    private void rebuildAll(RoutePlan plan, List<Stop> stops) {
-        Session session = session(plan, stops);
-        List<PlannedCab> planned = session.planner().plan(plan.getOffice().location(), stops, params(plan));
-        plan.getCabs().clear();
-        for (PlannedCab pc : planned) {
-            write(plan, plan.addCab(), pc, session);
-        }
+    /** Rebuilds the routing view of a stored plan. Stored stops are in driving order. */
+    private ShiftPlan restore(RoutePlan plan) {
+        List<ShiftPlan.Cab> cabs = plan.getCabs().stream().map(c -> toCab(plan, c)).toList();
+        return ShiftPlan.restore(plan.getOffice().location(), params(plan), travelProvider, cabs);
     }
 
-    /** A travel model for the office plus these stops, and a planner that uses it. */
-    private record Session(TravelEstimate travel, RoutePlanner planner) {
-    }
-
-    private Session session(RoutePlan plan, Collection<Stop> stops) {
-        List<GeoPoint> points = new ArrayList<>(stops.size() + 1);
-        points.add(plan.getOffice().location());
-        stops.forEach(s -> points.add(s.location()));
-        TravelEstimate travel = travelProvider.forPoints(points);
-        return new Session(travel, new RoutePlanner(travel.model()));
-    }
-
-    private void write(RoutePlan plan, CabRoute cab, PlannedCab planned, Session session) {
-        LocalDateTime officeTime = officeTime(plan);
-        List<StopTiming> timings = EtaCalculator.compute(session.travel().model(), plan.getOffice().location(),
-                planned.stops(), params(plan).shift(), props.dwellMinutes());
-
-        cab.update(planned.vehicle(), planned.distanceKm(), planned.maxRideMinutes(), planned.escortRequired(),
-                params(plan).cost(planned),
-                officeTime, session.travel().source());
-        cab.getStops().clear();
-        int sequence = 1;
-        for (StopTiming t : timings) {
-            Employee e = employees.getReferenceById(t.stop().employeeId());
-            cab.getStops().add(new RouteStop(cab, e, sequence++, t.stop().location(), t.eta(), t.rideMinutes()));
-        }
+    private ShiftPlan.Cab toCab(RoutePlan plan, CabRoute cab) {
+        List<StopTiming> stops = cab.getStops().stream()
+                .map(rs -> new StopTiming(
+                        new Stop(rs.getEmployee().getId(), rs.location(), rs.getEmployee().isEscortSensitive()),
+                        rs.getEta(), rs.getRideMinutes()))
+                .toList();
+        return new ShiftPlan.Cab(cab.getCabNumber(), plan.vehicleNamed(cab.getVehicleType()), stops,
+                cab.getDistanceKm(), cab.getMaxRideMinutes(), cab.isEscortRequired(), cab.getCost(),
+                cab.getOfficeTime(), cab.getTravelSource());
     }
 
     /**
-     * Rebuilds the routing view of a stored cab. Stored stops are in driving order.
-     * Distance and ride time are re-measured with this call's travel model, so an
-     * insertion compares like with like even if the cab was first timed another way.
+     * Writes every cab that differs between {@code before} and {@code after}, creating or
+     * updating entities as needed, and removes any entity whose cab number no longer
+     * appears in {@code after}.
      */
-    private PlannedCab toPlanned(RoutePlan plan, CabRoute cab, Session session) {
-        List<Stop> outward = new ArrayList<>(stopsOf(cab));
-        if (plan.getDirection() == Direction.PICKUP) {
-            Collections.reverse(outward);
+    private void save(RoutePlan plan, ShiftPlan before, ShiftPlan after) {
+        Map<Integer, CabRoute> existing = plan.getCabs().stream()
+                .collect(Collectors.toMap(CabRoute::getCabNumber, Function.identity()));
+        Map<Integer, ShiftPlan.Cab> beforeCabs = before.cabs().stream()
+                .collect(Collectors.toMap(ShiftPlan.Cab::cabNumber, Function.identity()));
+        Set<Integer> keep = new HashSet<>();
+
+        for (ShiftPlan.Cab cab : after.cabs()) {
+            keep.add(cab.cabNumber());
+            if (cab.equals(beforeCabs.get(cab.cabNumber()))) {
+                continue;
+            }
+            CabRoute entity = existing.get(cab.cabNumber());
+            if (entity == null) {
+                entity = plan.addCab(cab.cabNumber());
+            }
+            writeCab(entity, cab);
         }
-        GeoPoint office = plan.getOffice().location();
-        return new PlannedCab(plan.vehicleNamed(cab.getVehicleType()), outward,
-                RouteMetrics.pathKm(session.travel().model(), office, outward),
-                RouteMetrics.maxRideMinutes(session.travel().model(), office, outward, props.dwellMinutes(),
-                        params(plan).shift()),
-                cab.isEscortRequired());
+        plan.getCabs().removeIf(c -> !keep.contains(c.getCabNumber()));
+        // A cab created in a numbering gap is appended last; keep this response in cab order too.
+        plan.getCabs().sort(Comparator.comparingInt(CabRoute::getCabNumber));
     }
 
-    private List<Stop> allStops(RoutePlan plan) {
-        return plan.getCabs().stream().flatMap(c -> stopsOf(c).stream()).toList();
-    }
-
-    private List<Stop> stopsOf(CabRoute cab) {
-        return cab.getStops().stream()
-                .map(rs -> new Stop(rs.getEmployee().getId(), rs.location(), rs.getEmployee().isEscortSensitive()))
-                .toList();
+    private void writeCab(CabRoute entity, ShiftPlan.Cab cab) {
+        entity.update(cab.vehicle(), cab.distanceKm(), cab.maxRideMinutes(), cab.escortRequired(), cab.cost(),
+                cab.officeTime(), cab.timedBy());
+        entity.getStops().clear();
+        int sequence = 1;
+        for (StopTiming t : cab.stops()) {
+            Employee e = employees.getReferenceById(t.stop().employeeId());
+            entity.getStops().add(new RouteStop(entity, e, sequence++, t.stop().location(), t.eta(), t.rideMinutes()));
+        }
     }
 
     private RoutingParams params(RoutePlan plan) {

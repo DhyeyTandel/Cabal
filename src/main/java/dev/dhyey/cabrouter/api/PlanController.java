@@ -2,8 +2,8 @@ package dev.dhyey.cabrouter.api;
 
 import dev.dhyey.cabrouter.api.dto.CreatePlanRequest;
 import dev.dhyey.cabrouter.api.dto.PlanResponse;
+import dev.dhyey.cabrouter.routing.ReplanStrategy;
 import dev.dhyey.cabrouter.service.PlanningService;
-import dev.dhyey.cabrouter.service.ReplanStrategy;
 import jakarta.validation.Valid;
 import java.net.URI;
 import org.springframework.http.ResponseEntity;

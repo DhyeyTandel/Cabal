@@ -1,7 +1,8 @@
 package dev.dhyey.cabrouter.api;
 
+import dev.dhyey.cabrouter.routing.AlreadyOnPlanException;
 import dev.dhyey.cabrouter.routing.FleetExhaustedException;
-import dev.dhyey.cabrouter.service.ConflictException;
+import dev.dhyey.cabrouter.routing.NotOnPlanException;
 import dev.dhyey.cabrouter.service.InvalidRequestException;
 import dev.dhyey.cabrouter.service.NotFoundException;
 import org.springframework.http.HttpStatus;
@@ -25,8 +26,14 @@ public class ApiExceptionHandler {
         return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, e.getMessage());
     }
 
-    @ExceptionHandler(ConflictException.class)
-    ProblemDetail conflict(ConflictException e) {
+
+    @ExceptionHandler(NotOnPlanException.class)
+    ProblemDetail notOnPlan(NotOnPlanException e) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, e.getMessage());
+    }
+
+    @ExceptionHandler(AlreadyOnPlanException.class)
+    ProblemDetail alreadyOnPlan(AlreadyOnPlanException e) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.getMessage());
     }
 
