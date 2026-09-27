@@ -138,6 +138,25 @@ public class PlanningService {
         return PlanResponse.from(plan);
     }
 
+    /** Cabs that could be dissolved into nearby cabs at a saving, most savings first. */
+    @Transactional(readOnly = true)
+    public List<ShiftPlan.DissolveSuggestion> dissolveSuggestions(long planId) {
+        RoutePlan plan = load(planId);
+        RoutingParams params = params(plan);
+        return restore(plan, params).dissolveSuggestions();
+    }
+
+    /** Dissolves one cab: its riders move into nearby cabs and it is no longer needed. */
+    public PlanResponse dissolveCab(long planId, int cabNumber) {
+        RoutePlan plan = load(planId);
+        RoutingParams params = params(plan);
+        ShiftPlan before = restore(plan, params);
+        ShiftPlan after = before.dissolveCab(cabNumber);
+        save(plan, before, after);
+        plan.touch();
+        return PlanResponse.from(plan);
+    }
+
     /** Rebuilds the routing view of a stored plan. Stored stops are in driving order. */
     private ShiftPlan restore(RoutePlan plan, RoutingParams params) {
         List<ShiftPlan.Cab> cabs = plan.getCabs().stream().map(c -> toCab(plan, c)).toList();

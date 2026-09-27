@@ -1,6 +1,7 @@
 package dev.dhyey.cabrouter.api;
 
 import dev.dhyey.cabrouter.api.dto.CreatePlanRequest;
+import dev.dhyey.cabrouter.api.dto.DissolveSuggestionResponse;
 import dev.dhyey.cabrouter.api.dto.PlanResponse;
 import dev.dhyey.cabrouter.api.dto.PlanSummary;
 import dev.dhyey.cabrouter.routing.ReplanStrategy;
@@ -61,5 +62,17 @@ public class PlanController {
     @PostMapping("/{id}/replan")
     public PlanResponse replan(@PathVariable long id) {
         return planning.replan(id);
+    }
+
+    /** Cabs that could be dissolved into nearby cabs at a saving, most savings first. */
+    @GetMapping("/{id}/dissolve-suggestions")
+    public List<DissolveSuggestionResponse> dissolveSuggestions(@PathVariable long id) {
+        return planning.dissolveSuggestions(id).stream().map(DissolveSuggestionResponse::from).toList();
+    }
+
+    /** Dissolves one cab: its riders move into nearby cabs and it is no longer needed. */
+    @PostMapping("/{id}/cabs/{cabNumber}/dissolve")
+    public PlanResponse dissolveCab(@PathVariable long id, @PathVariable int cabNumber) {
+        return planning.dissolveCab(id, cabNumber);
     }
 }

@@ -2,7 +2,6 @@ package dev.dhyey.cabrouter.routing;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
@@ -139,8 +138,8 @@ final class InterRouteImprover {
         if (!dst.hasFreeSeat()) {
             return null;
         }
-        GeoPoint srcCentre = centroid(src);
-        GeoPoint dstCentre = centroid(dst);
+        GeoPoint srcCentre = CabNeighbours.centroid(src);
+        GeoPoint dstCentre = CabNeighbours.centroid(dst);
         for (Stop s : src.stops()) {
             // A one-rider cab is always worth trying to empty: it saves a vehicle.
             if (prune && src.stops().size() > 1 && !fitsBetterIn(s, srcCentre, dstCentre)) {
@@ -166,8 +165,8 @@ final class InterRouteImprover {
     private List<PlannedCab> trySwap(List<PlannedCab> cabs, int a, int b, RoutingParams params, boolean prune) {
         PlannedCab ca = cabs.get(a);
         PlannedCab cb = cabs.get(b);
-        GeoPoint centreA = centroid(ca);
-        GeoPoint centreB = centroid(cb);
+        GeoPoint centreA = CabNeighbours.centroid(ca);
+        GeoPoint centreB = CabNeighbours.centroid(cb);
         for (Stop s : ca.stops()) {
             for (Stop t : cb.stops()) {
                 if (prune && !fitsBetterIn(s, centreA, centreB) && !fitsBetterIn(t, centreB, centreA)) {
@@ -209,27 +208,7 @@ final class InterRouteImprover {
     }
 
     private List<Integer> nearestCabs(List<PlannedCab> cabs, int a) {
-        GeoPoint ca = centroid(cabs.get(a));
-        List<Integer> others = new ArrayList<>();
-        for (int i = 0; i < cabs.size(); i++) {
-            if (i != a) {
-                others.add(i);
-            }
-        }
-        // Centroids are not real stops, so a matrix-backed model has no entry for them.
-        // Straight-line distance is plenty for choosing which cabs to compare.
-        others.sort(Comparator.comparingDouble(i -> HaversineTravelModel.greatCircleKm(ca, centroid(cabs.get(i)))));
-        return others.subList(0, Math.min(NEIGHBOUR_CABS, others.size()));
-    }
-
-    private static GeoPoint centroid(PlannedCab cab) {
-        double lat = 0;
-        double lng = 0;
-        for (Stop s : cab.stops()) {
-            lat += s.location().lat();
-            lng += s.location().lng();
-        }
-        return new GeoPoint(lat / cab.stops().size(), lng / cab.stops().size());
+        return CabNeighbours.nearest(cabs, a, NEIGHBOUR_CABS);
     }
 
     private static Set<PlannedCab> identitySet() {

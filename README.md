@@ -52,6 +52,8 @@ no database:
 | `DELETE` | `/api/plans/{id}/employees/{empId}?strategy=LOCAL\|FULL` | Cancellation |
 | `POST` | `/api/plans/{id}/employees/{empId}` | Late booking |
 | `POST` | `/api/plans/{id}/replan` | Re-optimise the whole plan from scratch |
+| `GET` | `/api/plans/{id}/dissolve-suggestions` | Cabs that could be dissolved, ranked by money saved |
+| `POST` | `/api/plans/{id}/cabs/{cabNumber}/dissolve` | Dissolve one cab into its neighbours |
 | `GET` | `/healthz` | Liveness plus a database check |
 
 When `CABAL_API_KEY` is set (always, in production), every request that changes data
@@ -295,6 +297,21 @@ In practice, stability matters more than a few kilometres once drivers and rider
 been notified. So the cheap, predictable repair is the default, and the full
 re-optimisation is an explicit choice.
 
+**Dissolving a cab** is the middle path for plans that local repairs have thinned out.
+A cab can be dissolved when every one of its riders fits into one of its six nearest
+cabs, using a free seat or an upgrade to a free bigger vehicle (the dissolved cab's
+own vehicle counts as free), without breaking a ride limit, without a new night guard,
+and for less money overall. Riders move farthest from the office first, each by
+cheapest insertion. Only the dissolved cab and the cabs receiving its riders change;
+its number becomes a gap.
+
+Suggestions are alternatives, not a to-do list: applying one usually invalidates the
+others. So applying recomputes against the plan as it is now, and returns 409 if the
+dissolve no longer works. On the demo pickup, after four cancellations left two cabs
+at 2/4 and 1/4, the top suggestion dissolved a full 4-rider sedan into them and saved
+857 of 6,794 (cost went to 5,936), leaving every other cab's riders and ETAs as they
+were.
+
 ## Measured quality
 
 From the test suite (fixed seeds, so these numbers are reproducible):
@@ -397,7 +414,9 @@ These are honest gaps, roughly in the order I would fix them:
 4. **No time windows or depot deadhead.** Employees cannot say "not before 07:00".
    Cabs are assumed to start at their first stop, with no drive from the vendor's yard.
 5. **Local repair drifts.** Many cancellations in a row leave half-empty cabs, still in
-   their original vehicles. Nothing yet suggests "merge cabs 4 and 7" automatically.
+   their original vehicles. Dissolve suggestions recover much of this, but only one cab
+   at a time and only into its six nearest neighbours; pairs of cabs are not merged
+   into a new vehicle, and suggestions are not chained.
 6. **Large shifts take seconds.** A 2,000-rider full re-plan takes about 13 s. That is
    fine for planning ahead of a shift, but too slow to run on every edit, which is
    why edits use local repair. Beyond that, split by zone, or run the search under a

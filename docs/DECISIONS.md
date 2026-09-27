@@ -269,3 +269,57 @@ of CPU each.
   systemd.
 - 300 riders per plan in production. A 300-rider plan takes well under a second.
 - Tomcat serves 20 concurrent requests with 50 queued; Cloudflare absorbs the rest.
+
+## [2026-09-28] Suggest and apply dissolving a cab into its neighbours
+
+**Problem** — LOCAL cancellations keep every other driver's route stable, but over a
+shift they leave cabs half-empty. The only way back was a FULL replan, which moves
+every driver. Dispatchers need a middle path that touches only a few cabs.
+
+**Options considered**
+- Apply consolidation automatically after cancellations. Rejected: once drivers are
+  notified, a person should decide whether a saving is worth changing routes.
+- Pair merges (two cabs become one vehicle). Offered; the user chose dissolving only.
+- Dissolving one cab into its neighbours' free seats. Chosen.
+- Storing suggestions and applying them by id. Rejected: suggestions go stale as soon
+  as anyone cancels or books, so applying takes a cab number and recomputes.
+
+**Decision** — `ShiftPlan.dissolveSuggestions()` and `ShiftPlan.dissolveCab(n)`. For a
+cab, its riders move farthest-first by cheapest insertion into its six nearest cabs
+(free seat or upgrade, never a new cab), rejected if any rider has nowhere to go, a
+receiver would newly need a guard, or the total cost would not fall. Endpoints:
+`GET /api/plans/{id}/dissolve-suggestions` and `POST /api/plans/{id}/cabs/{n}/dissolve`
+(409 when no longer valid, 404 for an unknown cab). `RoutePlanner` gained
+`bestInsertionIntoExisting`, sharing its scoring with `bestInsertion`, and the
+centroid-neighbour logic moved into a shared `CabNeighbours`. Built by a Sonnet worker
+from a spec; the fleet-accounting fix below was made in review.
+
+**Tradeoff accepted**
+- Suggestions are computed independently, so they conflict with each other; the
+  dispatcher applies one and re-fetches.
+- Only one cab per operation and only into six neighbours, so it recovers less than a
+  FULL replan could.
+- Farthest-first cheapest insertion is greedy; a different rider order could sometimes
+  save more.
+
+**What went wrong**
+- The worker's version passed only the six neighbour cabs to the insertion call, which
+  derives free vehicles from the cabs it is given. A vehicle driven by any cab outside
+  the neighbourhood therefore looked free and could be offered as an upgrade, putting
+  one vehicle on two cabs. None of the worker's tests had busy vehicles outside the
+  neighbourhood. A regression test (the fleet's only SUV on a far-away cab, six full
+  sedans around the cab being dissolved) failed on the worker's code; the fix computes
+  free vehicles from every cab except the dissolved one, updated after each insertion.
+- The worker had to raise the API test's ride limit to 240 minutes before any cab was
+  dissolvable, which looked like the feature might rarely apply. Measured on the demo
+  at the default 90 minutes: no suggestions while cabs were full; after four
+  cancellations, four suggestions, the best saving 857 of 6,794. The 240 was an
+  artefact of that test's fixture.
+- The worker's upgrade-path test combines two separately planned clusters by hand,
+  because the planner never leaves a scarce big vehicle split that way on its own.
+- During the live check, `[ a == b ]` failed under zsh ("= not found"); rechecked with
+  jq.
+
+**Scale/limits** — Per call: one travel request for the whole plan, then for each cab
+up to (riders × 6) cab rebuilds. At the 300-rider production cap (about 75 cabs) that
+is at most a few thousand small rebuilds.

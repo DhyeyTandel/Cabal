@@ -167,6 +167,54 @@ class PlanApiIntegrationTest {
                 .andExpect(jsonPath("$.detail").value("employeeIds contains duplicates"));
     }
 
+    @Test
+    void dissolveSuggestionsAndDissolveCabEndpoints() throws Exception {
+        // North (0-3) and south (4-7) fill a 4-seat cab exactly each; east (8-9) is left
+        // with two free seats. Thinning south to one rider makes it dissolvable into east.
+        long planId = id(mvc.perform(post("/api/plans").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"officeId": %d, "shiftTime": "2026-10-01T09:00:00", "direction": "PICKUP",
+                                 "employeeIds": %s, "cabCapacity": 4, "maxRideMinutes": 240}"""
+                                .formatted(officeId, employeeIds)))
+                .andExpect(status().isCreated()).andReturn());
+
+        // Not dissolvable yet: north and south are both full, so east has nowhere to send its riders.
+        String before = mvc.perform(get("/api/plans/{id}", planId)).andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        int eastCabNumber = cabNumberFor(before, employeeIds.get(8));
+        mvc.perform(post("/api/plans/{id}/cabs/{cabNumber}/dissolve", planId, eastCabNumber))
+                .andExpect(status().isConflict());
+
+        mvc.perform(delete("/api/plans/{id}/employees/{emp}", planId, employeeIds.get(5))).andExpect(status().isOk());
+        mvc.perform(delete("/api/plans/{id}/employees/{emp}", planId, employeeIds.get(6))).andExpect(status().isOk());
+        String thinned = mvc.perform(delete("/api/plans/{id}/employees/{emp}", planId, employeeIds.get(7)))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        int southCabNumber = cabNumberFor(thinned, employeeIds.get(4));
+        int cabCountBefore = ((Number) JsonPath.read(thinned, "$.cabCount")).intValue();
+
+        mvc.perform(get("/api/plans/{id}/dissolve-suggestions", planId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[?(@.cabNumber == %d)]".formatted(southCabNumber)).exists());
+
+        mvc.perform(post("/api/plans/{id}/cabs/{cabNumber}/dissolve", planId, southCabNumber))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.cabCount").value(cabCountBefore - 1));
+
+        mvc.perform(post("/api/plans/{id}/cabs/{cabNumber}/dissolve", planId, 9999))
+                .andExpect(status().isNotFound());
+    }
+
+    private static int cabNumberFor(String planBody, long employeeId) {
+        for (Map<String, Object> cab : cabs(planBody)) {
+            List<Number> ids = JsonPath.read(cab, "$.stops[*].employeeId");
+            if (ids.stream().anyMatch(n -> n.longValue() == employeeId)) {
+                return ((Number) cab.get("cabNumber")).intValue();
+            }
+        }
+        throw new AssertionError("employee " + employeeId + " not found in any cab");
+    }
+
     private static long id(MvcResult result) throws Exception {
         return ((Number) JsonPath.read(result.getResponse().getContentAsString(), "$.id")).longValue();
     }

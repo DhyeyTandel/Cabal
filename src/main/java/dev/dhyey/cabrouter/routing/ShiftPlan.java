@@ -5,7 +5,12 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 /**
  * The routed cabs for one office, shift and direction, and the rules for editing them.
@@ -16,6 +21,9 @@ import java.util.List;
  * {@code PlanningService} is the only caller, translating to and from JPA entities.
  */
 public final class ShiftPlan {
+
+    /** How many of a dissolved cab's nearest other cabs are offered its riders. */
+    private static final int DISSOLVE_RECEIVER_LIMIT = 6;
 
     private final GeoPoint office;
     private final RoutingParams params;
@@ -41,6 +49,11 @@ public final class ShiftPlan {
         public boolean carries(long employeeId) {
             return stops.stream().anyMatch(s -> s.stop().employeeId() == employeeId);
         }
+    }
+
+    /** A cab that could be dissolved, and what it would save. */
+    public record DissolveSuggestion(int cabNumber, int ridersMoved, List<Integer> receivingCabNumbers,
+                                     double costBefore, double costAfter, double saving) {
     }
 
     /** Plans every stop from scratch: {@link RoutePlanner#plan}, cabs numbered 1..k. */
@@ -132,6 +145,65 @@ public final class ShiftPlan {
         return cabs;
     }
 
+    /**
+     * Cabs that could be dissolved (every rider moved into one of the 6 nearest other
+     * cabs) at a positive saving, ranked most savings first, ties broken by cab number.
+     * Empty on a plan with fewer than two cabs.
+     */
+    public List<DissolveSuggestion> dissolveSuggestions() {
+        if (cabs.size() < 2) {
+            return List.of();
+        }
+        TravelEstimate estimate = travel.forPoints(points(office, allStops()));
+        List<PlannedCab> allPlanned = cabs.stream().map(c -> toPlanned(c, estimate)).toList();
+        RoutePlanner planner = new RoutePlanner(estimate.model());
+
+        List<DissolveSuggestion> suggestions = new ArrayList<>();
+        for (int i = 0; i < cabs.size(); i++) {
+            DissolveAttempt attempt = attemptDissolve(i, allPlanned, planner);
+            if (attempt.succeeded()) {
+                List<Integer> receiving = attempt.changedReceivers().keySet().stream()
+                        .map(idx -> cabs.get(idx).cabNumber()).sorted().toList();
+                suggestions.add(new DissolveSuggestion(cabs.get(i).cabNumber(), allPlanned.get(i).stops().size(),
+                        receiving, attempt.costBefore(), attempt.costAfter(), attempt.saving()));
+            }
+        }
+        suggestions.sort(Comparator.comparingDouble(DissolveSuggestion::saving).reversed()
+                .thenComparingInt(DissolveSuggestion::cabNumber));
+        return suggestions;
+    }
+
+    /**
+     * Dissolves one cab: every one of its riders is moved into one of its 6 nearest other
+     * cabs (farthest rider from the office first), each by {@link RoutePlanner#bestInsertionIntoExisting}
+     * so no new cab is opened. Only the dissolved cab and the cabs that took its riders
+     * change; every other cab is carried over unchanged. Cab numbers are never reused.
+     *
+     * @throws NoSuchCabException if no cab has this number
+     * @throws CannotDissolveException if it cannot be dissolved, or dissolving it would not save money
+     */
+    public ShiftPlan dissolveCab(int cabNumber) {
+        int cIndex = indexOfCab(cabNumber);
+        TravelEstimate estimate = travel.forPoints(points(office, allStops()));
+        List<PlannedCab> allPlanned = cabs.stream().map(c -> toPlanned(c, estimate)).toList();
+        RoutePlanner planner = new RoutePlanner(estimate.model());
+
+        DissolveAttempt attempt = attemptDissolve(cIndex, allPlanned, planner);
+        if (!attempt.succeeded()) {
+            throw new CannotDissolveException(cabNumber, attempt.failureReason());
+        }
+
+        List<Cab> result = new ArrayList<>();
+        for (int i = 0; i < cabs.size(); i++) {
+            if (i == cIndex) {
+                continue;
+            }
+            PlannedCab changed = attempt.changedReceivers().get(i);
+            result.add(changed == null ? cabs.get(i) : toCab(cabs.get(i).cabNumber(), changed, estimate, params));
+        }
+        return new ShiftPlan(office, params, travel, result);
+    }
+
     /** Plans every stop from scratch against a fresh, whole-shift travel request. */
     private static List<Cab> planFromScratch(GeoPoint office, RoutingParams params, TravelModelProvider travel,
                                              List<Stop> stops) {
@@ -179,5 +251,102 @@ public final class ShiftPlan {
         points.add(office);
         stops.forEach(s -> points.add(s.location()));
         return points;
+    }
+
+    private int indexOfCab(int cabNumber) {
+        for (int i = 0; i < cabs.size(); i++) {
+            if (cabs.get(i).cabNumber() == cabNumber) {
+                return i;
+            }
+        }
+        throw new NoSuchCabException(cabNumber);
+    }
+
+    /**
+     * Tries to dissolve the cab at {@code cIndex} of {@code allPlanned} (indices matching
+     * {@link #cabs}): moves its riders, farthest from the office first, into its 6 nearest
+     * other cabs, each by {@link RoutePlanner#bestInsertionIntoExisting} over the current
+     * receivers so its own vehicle counts as free and no new cab can be opened. Rejects the
+     * move if any rider has nowhere to go, if a receiver would newly need an escort, or if
+     * the total cost does not fall.
+     */
+    private DissolveAttempt attemptDissolve(int cIndex, List<PlannedCab> allPlanned, RoutePlanner planner) {
+        PlannedCab candidate = allPlanned.get(cIndex);
+        List<Integer> receiverOrder = CabNeighbours.nearest(allPlanned, cIndex, DISSOLVE_RECEIVER_LIMIT);
+        Map<Integer, PlannedCab> receivers = new LinkedHashMap<>();
+        for (int idx : receiverOrder) {
+            receivers.put(idx, allPlanned.get(idx));
+        }
+        Set<Integer> changed = new LinkedHashSet<>();
+
+        List<Stop> farthestFirst = candidate.stops().stream()
+                .sorted(Comparator.comparingDouble(
+                        (Stop s) -> HaversineTravelModel.greatCircleKm(office, s.location())).reversed())
+                .toList();
+
+        for (Stop rider : farthestFirst) {
+            List<PlannedCab> receiverList = receiverOrder.stream().map(receivers::get).toList();
+            // Free vehicles come from the WHOLE plan minus the cab being dissolved (its vehicle
+            // is being released), with this attempt's earlier insertions applied. Counting only
+            // the neighbours would offer vehicles that far-away cabs are still driving.
+            List<PlannedCab> inUse = new ArrayList<>(allPlanned.size() - 1);
+            for (int i = 0; i < allPlanned.size(); i++) {
+                if (i != cIndex) {
+                    inUse.add(receivers.getOrDefault(i, allPlanned.get(i)));
+                }
+            }
+            FleetInventory free = FleetInventory.after(params.fleet(), inUse);
+            Optional<RoutePlanner.Insertion> insertion =
+                    planner.bestInsertionIntoExisting(office, receiverList, rider, params, free);
+            if (insertion.isEmpty()) {
+                return DissolveAttempt.failure("no room nearby for every rider");
+            }
+            int targetIdx = receiverOrder.get(insertion.get().cabIndex());
+            receivers.put(targetIdx, insertion.get().cab());
+            changed.add(targetIdx);
+        }
+
+        for (int idx : changed) {
+            if (receivers.get(idx).escortRequired() && !allPlanned.get(idx).escortRequired()) {
+                return DissolveAttempt.failure("would need a new escort");
+            }
+        }
+
+        double costBefore = params.cost(candidate);
+        double costAfter = 0;
+        for (int idx : changed) {
+            costBefore += params.cost(allPlanned.get(idx));
+            costAfter += params.cost(receivers.get(idx));
+        }
+        if (costBefore - costAfter <= 0) {
+            return DissolveAttempt.failure("would not save money");
+        }
+
+        Map<Integer, PlannedCab> changedReceivers = new LinkedHashMap<>();
+        for (int idx : changed) {
+            changedReceivers.put(idx, receivers.get(idx));
+        }
+        return DissolveAttempt.success(changedReceivers, costBefore, costAfter);
+    }
+
+    /** The result of one dissolve attempt: either a successful move, or the reason it failed. */
+    private record DissolveAttempt(Map<Integer, PlannedCab> changedReceivers, double costBefore, double costAfter,
+                                   String failureReason) {
+
+        static DissolveAttempt success(Map<Integer, PlannedCab> changedReceivers, double costBefore, double costAfter) {
+            return new DissolveAttempt(changedReceivers, costBefore, costAfter, null);
+        }
+
+        static DissolveAttempt failure(String reason) {
+            return new DissolveAttempt(Map.of(), 0, 0, reason);
+        }
+
+        boolean succeeded() {
+            return failureReason == null;
+        }
+
+        double saving() {
+            return costBefore - costAfter;
+        }
     }
 }

@@ -114,13 +114,70 @@ public final class RoutePlanner {
      * @throws FleetExhaustedException if every option is infeasible or no vehicle is free
      */
     public Insertion bestInsertion(GeoPoint office, List<PlannedCab> cabs, Stop stop, RoutingParams params) {
+        requireNotRouted(cabs, stop);
+        FleetInventory free = FleetInventory.after(params.fleet(), cabs);
+        CabBuilder builder = new CabBuilder(travel, sequencer, office, params);
+        Candidate existing = bestExisting(cabs, stop, free, builder, params);
+
+        // A solo trip's distance does not depend on the vehicle, so price the options on it directly.
+        double soloKm = RouteMetrics.pathKm(travel, office, List.of(stop));
+        Optional<VehicleType> fresh = free.cheapestFitting(1, soloKm);
+        if (fresh.isPresent()) {
+            PlannedCab solo = builder.build(fresh.get(), List.of(stop));
+            double score = params.cost(solo) + (solo.escortRequired() ? ESCORT_WORSENING_PENALTY : 0);
+            if (existing == null || score < existing.score()) {
+                return new Insertion(-1, solo);
+            }
+        }
+        if (existing == null) {
+            throw new FleetExhaustedException("every cab is full or too far, and no vehicle is free for a new one");
+        }
+        return new Insertion(existing.index(), existing.cab());
+    }
+
+    /**
+     * Like {@link #bestInsertion}, but never opens a new cab: only a free seat, or an
+     * upgrade to a free bigger vehicle, on one of the cabs given is considered. Used to
+     * dissolve a cab without simply replacing it with another one.
+     *
+     * @return empty if no existing cab can take the rider
+     */
+    public Optional<Insertion> bestInsertionIntoExisting(GeoPoint office, List<PlannedCab> cabs, Stop stop,
+                                                         RoutingParams params) {
+        return bestInsertionIntoExisting(office, cabs, stop, params, FleetInventory.after(params.fleet(), cabs));
+    }
+
+    /**
+     * As above, but with the free vehicles given explicitly. Use this when {@code cabs} is
+     * only some of the plan's cabs (for example a neighbourhood): vehicles in use by the
+     * cabs left out are still in use, so the caller must count them.
+     */
+    public Optional<Insertion> bestInsertionIntoExisting(GeoPoint office, List<PlannedCab> cabs, Stop stop,
+                                                         RoutingParams params, FleetInventory free) {
+        requireNotRouted(cabs, stop);
+        CabBuilder builder = new CabBuilder(travel, sequencer, office, params);
+        Candidate existing = bestExisting(cabs, stop, free, builder, params);
+        return existing == null ? Optional.empty() : Optional.of(new Insertion(existing.index(), existing.cab()));
+    }
+
+    private static void requireNotRouted(List<PlannedCab> cabs, Stop stop) {
         for (PlannedCab cab : cabs) {
             if (cab.contains(stop.employeeId())) {
                 throw new IllegalArgumentException("employee " + stop.employeeId() + " is already routed");
             }
         }
-        FleetInventory free = FleetInventory.after(params.fleet(), cabs);
-        CabBuilder builder = new CabBuilder(travel, sequencer, office, params);
+    }
+
+    /**
+     * The cheapest way to add {@code stop} to one of {@code cabs}, by a free seat or by
+     * upgrading to a bigger free vehicle. Shared by {@link #bestInsertion} and
+     * {@link #bestInsertionIntoExisting}, which differ only in whether a brand new cab is
+     * also considered.
+     *
+     * @return the best option found, or null if none is feasible
+     */
+    private Candidate bestExisting(List<PlannedCab> cabs, Stop stop, FleetInventory free, CabBuilder builder,
+                                   RoutingParams params) {
         int bestIndex = -1;
         PlannedCab bestCab = null;
         double bestScore = Double.MAX_VALUE;
@@ -149,21 +206,11 @@ public final class RoutePlanner {
                 }
             }
         }
+        return bestCab == null ? null : new Candidate(bestIndex, bestCab, bestScore);
+    }
 
-        // A solo trip's distance does not depend on the vehicle, so price the options on it directly.
-        double soloKm = RouteMetrics.pathKm(travel, office, List.of(stop));
-        Optional<VehicleType> fresh = free.cheapestFitting(1, soloKm);
-        if (fresh.isPresent()) {
-            PlannedCab solo = builder.build(fresh.get(), List.of(stop));
-            double score = params.cost(solo) + (solo.escortRequired() ? ESCORT_WORSENING_PENALTY : 0);
-            if (score < bestScore) {
-                return new Insertion(-1, solo);
-            }
-        }
-        if (bestCab == null) {
-            throw new FleetExhaustedException("every cab is full or too far, and no vehicle is free for a new one");
-        }
-        return new Insertion(bestIndex, bestCab);
+    /** The best existing-cab insertion found by {@link #bestExisting}. */
+    private record Candidate(int index, PlannedCab cab, double score) {
     }
 
     /** @param cabIndex index into the cab list that was passed in, or -1 when a new cab is needed */

@@ -1,7 +1,9 @@
 package dev.dhyey.cabrouter.api;
 
 import dev.dhyey.cabrouter.routing.AlreadyOnPlanException;
+import dev.dhyey.cabrouter.routing.CannotDissolveException;
 import dev.dhyey.cabrouter.routing.FleetExhaustedException;
+import dev.dhyey.cabrouter.routing.NoSuchCabException;
 import dev.dhyey.cabrouter.routing.NotOnPlanException;
 import dev.dhyey.cabrouter.service.InvalidRequestException;
 import dev.dhyey.cabrouter.service.NotFoundException;
@@ -34,6 +36,16 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler(AlreadyOnPlanException.class)
     ProblemDetail alreadyOnPlan(AlreadyOnPlanException e) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.getMessage());
+    }
+
+    @ExceptionHandler(NoSuchCabException.class)
+    ProblemDetail noSuchCab(NoSuchCabException e) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, e.getMessage());
+    }
+
+    @ExceptionHandler(CannotDissolveException.class)
+    ProblemDetail cannotDissolve(CannotDissolveException e) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.getMessage());
     }
 
