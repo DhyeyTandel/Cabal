@@ -47,6 +47,22 @@ public final class Timetable {
     public static Timetable of(TravelModel travel, GeoPoint office, List<Stop> outwardStops,
                                ShiftContext shift, double dwellMinutes) {
         List<Stop> outward = List.copyOf(outwardStops);
+        return new Timetable(outward, shift, dwellMinutes, rideMinutes(travel, office, outward, shift, dwellMinutes));
+    }
+
+    /**
+     * The longest ride on this route, without building a Timetable. The sweep asks this
+     * thousands of times per plan, so it skips the defensive copy and the object; it runs
+     * the same {@link #rideMinutes} walk, so it always equals {@code of(...).maxRideMinutes()}.
+     */
+    public static double maxRideMinutes(TravelModel travel, GeoPoint office, List<Stop> outwardStops,
+                                        ShiftContext shift, double dwellMinutes) {
+        double[] ride = rideMinutes(travel, office, outwardStops, shift, dwellMinutes);
+        return ride.length == 0 ? 0 : ride[ride.length - 1];
+    }
+
+    private static double[] rideMinutes(TravelModel travel, GeoPoint office, List<Stop> outward,
+                                        ShiftContext shift, double dwellMinutes) {
         double[] ride = new double[outward.size()];
         double elapsed = 0;
         GeoPoint prev = office;
@@ -67,7 +83,7 @@ public final class Timetable {
             ride[k] = elapsed + k * dwellMinutes;
             prev = here;
         }
-        return new Timetable(outward, shift, dwellMinutes, ride);
+        return ride;
     }
 
     /**

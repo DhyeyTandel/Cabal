@@ -10,6 +10,7 @@ import static org.assertj.core.data.Offset.offset;
 import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Random;
 import org.junit.jupiter.api.Test;
 
 class TimetableTest {
@@ -132,5 +133,23 @@ class TimetableTest {
 
         assertThat(timetable.maxRideMinutes()).isEqualTo(0);
         assertThatThrownBy(timetable::farEndTime).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void theAllocationFreeMaxRideMatchesTheFullTimetable() {
+        Random rnd = new Random(9);
+        double[] peak = new double[24];
+        Arrays.fill(peak, 1.2);
+        peak[8] = 2.4;
+        peak[9] = 2.6;
+        TrafficProfile traffic = new TrafficProfile(peak);
+        for (Direction direction : Direction.values()) {
+            ShiftContext shift = new ShiftContext(direction, LocalDateTime.of(2026, 10, 1, 9, 0), 20, 7, traffic);
+            for (int trial = 0; trial < 50; trial++) {
+                List<Stop> outward = Fixtures.randomStops(rnd, 1 + rnd.nextInt(6), 15);
+                assertThat(Timetable.maxRideMinutes(TRAVEL, OFFICE, outward, shift, 2))
+                        .isEqualTo(Timetable.of(TRAVEL, OFFICE, outward, shift, 2).maxRideMinutes());
+            }
+        }
     }
 }
