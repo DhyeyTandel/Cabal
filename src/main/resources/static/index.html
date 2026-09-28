@@ -27,13 +27,41 @@
   </header>
 
   <main>
-    <nav class="pill-row" id="plan-pills" aria-label="Plans"></nav>
+    <nav class="pill-row" id="mode-pills" aria-label="Mode">
+      <button type="button" class="plan-pill" id="mode-demo-pill" aria-pressed="true">Demo plans</button>
+      <button type="button" class="plan-pill" id="mode-sandbox-pill" aria-pressed="false">Try it</button>
+    </nav>
+
+    <div id="demo-mode">
+      <nav class="pill-row" id="plan-pills" aria-label="Plans"></nav>
+    </div>
+
+    <div id="sandbox-mode" hidden>
+      <p class="sandbox-lede">Drop riders on the map or add 20 at random, then plan. Nothing is saved.</p>
+      <div class="sandbox-controls">
+        <nav class="pill-row" id="shift-pills" aria-label="Shift">
+          <button type="button" class="plan-pill" data-shift-time="07:30" data-direction="PICKUP" aria-pressed="true">07:30 pickup</button>
+          <button type="button" class="plan-pill" data-shift-time="22:00" data-direction="DROP" aria-pressed="false">22:00 drop</button>
+        </nav>
+        <nav class="pill-row" id="fleet-pills" aria-label="Fleet">
+          <button type="button" class="plan-pill" data-fleet="SEDANS" aria-pressed="true">4-seat cabs</button>
+          <button type="button" class="plan-pill" data-fleet="MIXED" aria-pressed="false">Sedans + 2 SUVs</button>
+        </nav>
+        <div class="sandbox-actions">
+          <button type="button" class="ghost-button" id="random-riders-btn">20 random riders</button>
+          <button type="button" class="ghost-button" id="clear-riders-btn">Clear</button>
+          <span class="rider-counter" id="rider-counter">0 / 40 riders</span>
+          <button type="button" class="primary-pill" id="plan-it-btn" disabled>Plan it</button>
+        </div>
+      </div>
+    </div>
 
     <p class="state-message" id="state-message" hidden></p>
+    <p class="sandbox-not-saved" id="sandbox-not-saved" hidden>Your plan, not saved</p>
 
     <section class="plan-detail" id="plan-detail" hidden>
       <div class="detail-main">
-        <dl class="summary-bar" id="summary-bar"></dl>
+        <dl class="summary-bar" id="summary-bar" hidden></dl>
         <div class="map-frame">
           <div id="map"></div>
         </div>

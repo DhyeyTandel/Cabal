@@ -1,17 +1,44 @@
 "use strict";
 
 /**
- * Cabal live demo. A read-only view over the plans API: pick a plan, see its cabs on a map,
- * open a cab to see its stops. No framework, no build step; plain fetch against this origin.
- * Every piece of API data is written with textContent / DOM APIs, never innerHTML, and every
- * Leaflet popup is built from DOM nodes rather than an HTML string.
+ * Cabal demo site. Two modes, one shared renderer:
+ *  - "Demo plans": a read-only view over the plans API, picking a pre-computed plan.
+ *  - "Try it": a public sandbox where a visitor drops riders on the map and the real
+ *    engine plans them server-side, saving nothing (POST /api/sandbox/plan).
+ * Both modes normalise their API response into the same plan/office shape (see
+ * normalizePlan/normalizeOffice) and feed it to the same renderSummary/renderMap/renderCabList
+ * functions, so there is one rendering path, not two.
+ *
+ * No framework, no build step; plain fetch against this origin. Every piece of API data is
+ * written with textContent / DOM APIs, never innerHTML, and every Leaflet popup is built from
+ * DOM nodes rather than an HTML string.
  */
+
+const modePillsEl = document.getElementById("mode-pills");
+const modeDemoPillEl = document.getElementById("mode-demo-pill");
+const modeSandboxPillEl = document.getElementById("mode-sandbox-pill");
+const demoModeEl = document.getElementById("demo-mode");
+const sandboxModeEl = document.getElementById("sandbox-mode");
 
 const pillsEl = document.getElementById("plan-pills");
 const stateEl = document.getElementById("state-message");
+const notSavedEl = document.getElementById("sandbox-not-saved");
 const detailEl = document.getElementById("plan-detail");
 const summaryEl = document.getElementById("summary-bar");
 const cabListEl = document.getElementById("cab-list");
+
+const shiftPillsEl = document.getElementById("shift-pills");
+const fleetPillsEl = document.getElementById("fleet-pills");
+const randomRidersBtn = document.getElementById("random-riders-btn");
+const clearRidersBtn = document.getElementById("clear-riders-btn");
+const riderCounterEl = document.getElementById("rider-counter");
+const planItBtn = document.getElementById("plan-it-btn");
+
+const SANDBOX_MAX_RIDERS = 40;
+const SANDBOX_RANDOM_RADIUS_KM = 15;
+const SANDBOX_RANDOM_WOMAN_SHARE = 1 / 3;
+/** Fixed office the sandbox always plans against; matches SandboxService on the server. */
+const SANDBOX_OFFICE_NAME = "Manyata Tech Park";
 
 let map = null;
 let routeLayers = new Map(); // cabNumber -> polyline
@@ -19,7 +46,16 @@ let markerLayer = null;
 let selectedPlanId = null;
 let selectedCabNumber = null;
 
+let mode = "demo"; // "demo" | "sandbox"
+let sandboxRiders = []; // { lat, lng, woman }
+let sandboxPinLayer = null; // input-pin markers, shown whenever there is no computed plan yet
+let sandboxHasPlan = false;
+let sandboxShift = { time: "07:30", direction: "PICKUP" };
+let sandboxFleet = "SEDANS";
+
 init();
+wireModePills();
+wireSandboxControls();
 
 async function init() {
   try {
@@ -45,6 +81,7 @@ function showState(message, isError) {
 function hideState() {
   stateEl.hidden = true;
   stateEl.textContent = "";
+  stateEl.classList.remove("state-message--error");
 }
 
 function renderPills(plans) {
@@ -88,18 +125,66 @@ async function fetchJson(url) {
   return res.json();
 }
 
+/* ---------------------------------------------------------------------------------------
+ * Mode switching
+ * ------------------------------------------------------------------------------------- */
+
+function wireModePills() {
+  modeDemoPillEl.addEventListener("click", () => setMode("demo"));
+  modeSandboxPillEl.addEventListener("click", () => setMode("sandbox"));
+}
+
+function setMode(newMode) {
+  if (mode === newMode) {
+    return;
+  }
+  mode = newMode;
+  modeDemoPillEl.setAttribute("aria-pressed", String(newMode === "demo"));
+  modeSandboxPillEl.setAttribute("aria-pressed", String(newMode === "sandbox"));
+  demoModeEl.hidden = newMode !== "demo";
+  sandboxModeEl.hidden = newMode !== "sandbox";
+  hideState();
+  notSavedEl.hidden = true;
+
+  if (newMode === "demo") {
+    if (selectedPlanId !== null) {
+      selectPlan(selectedPlanId);
+    } else {
+      detailEl.hidden = true;
+    }
+    return;
+  }
+
+  summaryEl.hidden = true;
+  summaryEl.textContent = "";
+  cabListEl.textContent = "";
+  detailEl.hidden = false;
+  sandboxHasPlan = false;
+  updateRiderCounter();
+  renderSandboxPins();
+}
+
+/* ---------------------------------------------------------------------------------------
+ * Demo mode: pick a pre-computed plan
+ * ------------------------------------------------------------------------------------- */
+
 async function selectPlan(planId) {
   selectedPlanId = planId;
   selectedCabNumber = null;
   markSelectedPill(planId);
   try {
-    const plan = await fetchJson(`/api/plans/${planId}`);
-    const office = await fetchJson(`/api/offices/${plan.officeId}`);
+    const rawPlan = await fetchJson(`/api/plans/${planId}`);
+    const rawOffice = await fetchJson(`/api/offices/${rawPlan.officeId}`);
     if (selectedPlanId !== planId) {
       return; // a newer selection has already started
     }
     hideState();
+    notSavedEl.hidden = true;
     detailEl.hidden = false;
+    summaryEl.hidden = false;
+
+    const plan = normalizePlan(rawPlan, "demo");
+    const office = normalizeOffice(rawOffice, "demo");
     renderSummary(plan);
     renderMap(plan, office);
     renderCabList(plan);
@@ -111,11 +196,228 @@ async function selectPlan(planId) {
   }
 }
 
+/* ---------------------------------------------------------------------------------------
+ * Sandbox mode: drop riders, plan them, nothing saved
+ * ------------------------------------------------------------------------------------- */
+
+function wireSandboxControls() {
+  for (const pill of shiftPillsEl.children) {
+    pill.addEventListener("click", () => {
+      for (const p of shiftPillsEl.children) {
+        p.setAttribute("aria-pressed", String(p === pill));
+      }
+      sandboxShift = { time: pill.dataset.shiftTime, direction: pill.dataset.direction };
+    });
+  }
+  for (const pill of fleetPillsEl.children) {
+    pill.addEventListener("click", () => {
+      for (const p of fleetPillsEl.children) {
+        p.setAttribute("aria-pressed", String(p === pill));
+      }
+      sandboxFleet = pill.dataset.fleet;
+    });
+  }
+  randomRidersBtn.addEventListener("click", addRandomSandboxRiders);
+  clearRidersBtn.addEventListener("click", clearSandboxRiders);
+  planItBtn.addEventListener("click", runSandboxPlan);
+}
+
+function updateRiderCounter() {
+  riderCounterEl.textContent = `${sandboxRiders.length} / ${SANDBOX_MAX_RIDERS} riders`;
+  planItBtn.disabled = sandboxRiders.length === 0;
+}
+
+function onSandboxRidersChanged() {
+  sandboxHasPlan = false;
+  notSavedEl.hidden = true;
+  summaryEl.hidden = true;
+  summaryEl.textContent = "";
+  cabListEl.textContent = "";
+  hideState();
+  updateRiderCounter();
+  renderSandboxPins();
+}
+
+function addSandboxRider(lat, lng, woman) {
+  if (sandboxRiders.length >= SANDBOX_MAX_RIDERS) {
+    return;
+  }
+  sandboxRiders.push({ lat, lng, woman: Boolean(woman) });
+}
+
+function removeSandboxRider(rider) {
+  sandboxRiders = sandboxRiders.filter((r) => r !== rider);
+  onSandboxRidersChanged();
+}
+
+function clearSandboxRiders() {
+  sandboxRiders = [];
+  onSandboxRidersChanged();
+}
+
+function addRandomSandboxRiders() {
+  const toAdd = Math.min(20, SANDBOX_MAX_RIDERS - sandboxRiders.length);
+  for (let i = 0; i < toAdd; i++) {
+    const radiusKm = SANDBOX_RANDOM_RADIUS_KM * Math.sqrt(Math.random());
+    const angle = Math.random() * 2 * Math.PI;
+    const officeLat = sandboxOffice().latitude;
+    const officeLng = sandboxOffice().longitude;
+    const dLat = (radiusKm * Math.cos(angle)) / 111;
+    const dLng = (radiusKm * Math.sin(angle)) / (111 * Math.cos((officeLat * Math.PI) / 180));
+    addSandboxRider(officeLat + dLat, officeLng + dLng, Math.random() < SANDBOX_RANDOM_WOMAN_SHARE);
+  }
+  onSandboxRidersChanged();
+}
+
+function sandboxOffice() {
+  return { name: SANDBOX_OFFICE_NAME, latitude: 13.0475, longitude: 77.6206 };
+}
+
+function onSandboxMapClick(e) {
+  if (mode !== "sandbox" || sandboxRiders.length >= SANDBOX_MAX_RIDERS) {
+    return;
+  }
+  addSandboxRider(e.latlng.lat, e.latlng.lng, false);
+  onSandboxRidersChanged();
+}
+
+/** The raw input pins: office plus one marker per rider, click to remove, no routes yet. */
+function renderSandboxPins() {
+  ensureMap();
+  clearRouteAndMarkerLayers();
+  if (sandboxPinLayer) {
+    map.removeLayer(sandboxPinLayer);
+  }
+  sandboxPinLayer = L.layerGroup().addTo(map);
+
+  const office = sandboxOffice();
+  const officeMarker = L.marker([office.latitude, office.longitude], { icon: officeIcon() });
+  officeMarker.bindPopup(buildOfficePopup(office));
+  officeMarker.addTo(sandboxPinLayer);
+
+  const allPoints = [[office.latitude, office.longitude]];
+  for (const rider of sandboxRiders) {
+    const marker = L.marker([rider.lat, rider.lng], { icon: stopIcon() });
+    marker.on("click", () => removeSandboxRider(rider));
+    marker.addTo(sandboxPinLayer);
+    allPoints.push([rider.lat, rider.lng]);
+  }
+  map.fitBounds(allPoints, { padding: [32, 32] });
+}
+
+async function runSandboxPlan() {
+  if (sandboxRiders.length === 0) {
+    return;
+  }
+  hideState();
+  planItBtn.disabled = true;
+  planItBtn.textContent = "Planning...";
+  try {
+    const body = {
+      direction: sandboxShift.direction,
+      shiftTime: sandboxShift.time,
+      fleet: sandboxFleet,
+      riders: sandboxRiders.map((r) => ({ latitude: r.lat, longitude: r.lng, woman: r.woman })),
+    };
+    const res = await fetch("/api/sandbox/plan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const problem = await res.json().catch(() => null);
+      const detail = problem && problem.detail ? problem.detail : `the sandbox failed with ${res.status}`;
+      showState(detail, res.status !== 429);
+      detailEl.hidden = false; // showState hides it; the map and pins should stay visible
+      return;
+    }
+
+    const rawPlan = await res.json();
+    sandboxHasPlan = true;
+    const plan = normalizePlan(rawPlan, "sandbox");
+    const office = normalizeOffice(rawPlan, "sandbox");
+    summaryEl.hidden = false;
+    renderSummary(plan);
+    renderMap(plan, office, { onStopClick: (stop) => removeSandboxRider(sandboxRiders[stop.id - 1]) });
+    renderCabList(plan);
+    if (plan.cabs.length > 0) {
+      setSelectedCab(plan.cabs[0].cabNumber);
+    }
+    notSavedEl.hidden = false;
+  } catch (err) {
+    showState("Couldn't reach the sandbox. Try again.", true);
+    detailEl.hidden = false;
+  } finally {
+    planItBtn.textContent = "Plan it";
+    planItBtn.disabled = sandboxRiders.length === 0;
+  }
+}
+
+/* ---------------------------------------------------------------------------------------
+ * Normalisation: demo plans (PlanResponse) and sandbox plans (SandboxPlanResponse) map to
+ * one common shape so the rendering functions below only need to know one field naming.
+ * ------------------------------------------------------------------------------------- */
+
+function normalizePlan(raw, kind) {
+  const riderCount = kind === "demo" ? raw.employeeCount : raw.riderCount;
+  return {
+    direction: raw.direction,
+    cabCount: raw.cabCount,
+    riderCount,
+    totalDistanceKm: raw.totalDistanceKm,
+    totalCost: raw.totalCost,
+    windowsMissed: raw.windowsMissed,
+    cabs: raw.cabs.map((c) => normalizeCab(c, kind)),
+  };
+}
+
+function normalizeCab(c, kind) {
+  return {
+    cabNumber: c.cabNumber,
+    vehicleType: c.vehicleType,
+    seats: c.seats,
+    seatsUsed: c.seatsUsed,
+    distanceKm: c.distanceKm,
+    cost: c.cost,
+    maxRideMinutes: c.maxRideMinutes,
+    escortRequired: c.escortRequired,
+    stops: c.stops.map((s) => normalizeStop(s, kind)),
+  };
+}
+
+function normalizeStop(s, kind) {
+  return {
+    sequence: s.sequence,
+    id: kind === "demo" ? s.employeeId : s.riderNumber,
+    name: kind === "demo" ? s.employeeName : s.name,
+    latitude: s.latitude,
+    longitude: s.longitude,
+    eta: s.eta,
+    rideMinutes: s.rideMinutes,
+    earliestPickup: s.earliestPickup,
+    latestDrop: s.latestDrop,
+    windowMissed: s.windowMissed,
+  };
+}
+
+function normalizeOffice(raw, kind) {
+  if (kind === "demo") {
+    return { name: raw.name, latitude: raw.latitude, longitude: raw.longitude };
+  }
+  return { name: SANDBOX_OFFICE_NAME, latitude: raw.officeLatitude, longitude: raw.officeLongitude };
+}
+
+/* ---------------------------------------------------------------------------------------
+ * Shared rendering: summary metrics, map, cab list. Both modes normalise into the same
+ * plan/office shape above and call these directly.
+ * ------------------------------------------------------------------------------------- */
+
 function renderSummary(plan) {
+  summaryEl.hidden = false;
   summaryEl.textContent = "";
   const metrics = [
     ["Cabs", String(plan.cabCount)],
-    ["Riders", String(plan.employeeCount)],
+    ["Riders", String(plan.riderCount)],
     ["Distance", `${formatNumber(plan.totalDistanceKm)} km`],
     ["Cost", formatNumber(plan.totalCost)],
   ];
@@ -160,7 +462,7 @@ function buildStopPopup(stop) {
   const wrap = document.createElement("div");
   wrap.className = "map-popup";
   const name = document.createElement("strong");
-  name.textContent = stop.employeeName;
+  name.textContent = stop.name;
   const eta = document.createElement("div");
   eta.className = "map-popup__eta";
   eta.textContent = `ETA ${formatTime(stop.eta)}`;
@@ -178,24 +480,46 @@ function buildOfficePopup(office) {
   return wrap;
 }
 
-function renderMap(plan, office) {
-  if (!map) {
-    map = L.map("map");
-    // OpenStreetMap's own tiles: no key, attribution required. Light use like a demo
-    // page is within the OSM tile usage policy.
-    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-      maxZoom: 19,
-    }).addTo(map);
+function ensureMap() {
+  if (map) {
+    // Switching modes can hide and re-show the map's container; Leaflet caches the last
+    // known size, so refresh it in case that happened.
+    map.invalidateSize();
+    return;
   }
+  map = L.map("map");
+  // OpenStreetMap's own tiles: no key, attribution required. Light use like a demo
+  // page is within the OSM tile usage policy.
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    maxZoom: 19,
+  }).addTo(map);
+  map.on("click", onSandboxMapClick);
+}
 
+function clearRouteAndMarkerLayers() {
   for (const layer of routeLayers.values()) {
     map.removeLayer(layer);
   }
   routeLayers.clear();
   if (markerLayer) {
     map.removeLayer(markerLayer);
+    markerLayer = null;
   }
+}
+
+/**
+ * Draws every cab's route and stops. In sandbox mode {@code opts.onStopClick(stop)} is
+ * called instead of opening a popup, so a rider pin stays click-to-remove after planning.
+ */
+function renderMap(plan, office, opts = {}) {
+  ensureMap();
+  if (sandboxPinLayer) {
+    map.removeLayer(sandboxPinLayer);
+    sandboxPinLayer = null;
+  }
+
+  clearRouteAndMarkerLayers();
   markerLayer = L.layerGroup().addTo(map);
 
   const officeMarker = L.marker([office.latitude, office.longitude], { icon: officeIcon() });
@@ -215,7 +539,11 @@ function renderMap(plan, office) {
 
     for (const stop of cab.stops) {
       const marker = L.marker([stop.latitude, stop.longitude], { icon: stopIcon() });
-      marker.bindPopup(buildStopPopup(stop));
+      if (opts.onStopClick) {
+        marker.on("click", () => opts.onStopClick(stop));
+      } else {
+        marker.bindPopup(buildStopPopup(stop));
+      }
       marker.addTo(markerLayer);
     }
   }
@@ -317,7 +645,7 @@ function buildCabCard(cab, direction) {
     item.className = "cab-card__stop";
     const name = document.createElement("span");
     name.className = "cab-card__stop-name";
-    name.textContent = stop.employeeName;
+    name.textContent = stop.name;
 
     const timeWrap = document.createElement("span");
     timeWrap.className = "cab-card__stop-time";

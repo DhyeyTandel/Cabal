@@ -13,14 +13,17 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 /**
  * Write protection for the public API. Reads (GET, HEAD, OPTIONS) are always open; every other
- * request, on any path, must carry header {@code X-API-Key} matching {@code cabal.api-key}.
- * When that property is blank the filter lets everything through, which is what local dev, tests
- * and the demo script rely on. The key is never logged, and comparison is constant time.
+ * request, on any path, must carry header {@code X-API-Key} matching {@code cabal.api-key},
+ * with one exemption: {@code POST /api/sandbox/plan} (see {@link #needsKey}), the public "try
+ * it" demo, which never touches the database. When {@code cabal.api-key} is blank the filter
+ * lets everything through, which is what local dev, tests and the demo script rely on. The key
+ * is never logged, and comparison is constant time.
  */
 @Component
 public class ApiKeyFilter extends OncePerRequestFilter {
 
     private static final String HEADER = "X-API-Key";
+    static final String SANDBOX_PLAN_PATH = "/api/sandbox/plan";
     private static final String UNAUTHORIZED_BODY =
             "{\"title\":\"Unauthorized\",\"status\":401,\"detail\":\"changing data needs an API key\"}";
 
@@ -54,14 +57,21 @@ public class ApiKeyFilter extends OncePerRequestFilter {
     }
 
     /**
-     * Every request that could change data needs the key, whatever its path. Matching on
-     * the path is deliberately avoided: the raw request URI can differ from the path Spring
-     * routes on (for example {@code /%61pi/offices} or {@code //api/offices} both reach
-     * {@code /api/offices}), so a path prefix check could be bypassed. No public endpoint
-     * writes anything, so there is nothing to exempt.
+     * Every request that could change data needs the key, whatever its path, with one
+     * exemption: a POST whose raw request URI is EXACTLY {@code /api/sandbox/plan} (the
+     * public sandbox, which persists nothing; see {@code SandboxController}). Matching on
+     * the path is otherwise deliberately avoided: the raw request URI can differ from the
+     * path Spring routes on (for example {@code /%61pi/offices} or {@code //api/offices}
+     * both reach {@code /api/offices}), so a path prefix check could be bypassed. The
+     * sandbox exemption is intentionally exact-match, not a prefix: an encoded, doubled-slash
+     * or trailing-slash variant of the path, or a sub-path of it, still needs the key. No
+     * other public endpoint writes anything, so there is nothing else to exempt.
      */
     private static boolean needsKey(HttpServletRequest request) {
         String method = request.getMethod();
-        return !("GET".equals(method) || "HEAD".equals(method) || "OPTIONS".equals(method));
+        if ("GET".equals(method) || "HEAD".equals(method) || "OPTIONS".equals(method)) {
+            return false;
+        }
+        return !("POST".equals(method) && SANDBOX_PLAN_PATH.equals(request.getRequestURI()));
     }
 }

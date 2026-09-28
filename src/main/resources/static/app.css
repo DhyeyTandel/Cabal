@@ -189,9 +189,107 @@ a:hover {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .plan-pill, .cab-card, .cab-card__stop {
+  .plan-pill, .cab-card, .cab-card__stop, .ghost-button, .primary-pill {
     transition: none !important;
   }
+}
+
+/* Sandbox ("Try it") controls */
+
+.sandbox-lede {
+  color: var(--muted);
+  font-size: 15px;
+  margin: 0 0 24px;
+}
+
+.sandbox-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 24px;
+}
+
+.sandbox-controls .pill-row {
+  margin: 0;
+}
+
+.sandbox-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.ghost-button {
+  font-family: "Sofia Sans", system-ui, sans-serif;
+  font-weight: 560;
+  font-size: 13.5px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--faint);
+  border-radius: var(--r-pill);
+  padding: 8px 16px;
+  cursor: pointer;
+  transition: transform var(--dur) var(--ease-spring), color var(--dur-fast) var(--ease-swift),
+    border-color var(--dur-fast) var(--ease-swift);
+}
+
+.ghost-button:hover {
+  color: var(--ink);
+  border-color: var(--muted-soft);
+  transform: translateY(-2px);
+}
+
+.rider-counter {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12.5px;
+  color: var(--muted);
+  margin-left: auto;
+}
+
+.primary-pill {
+  font-family: "Sofia Sans", system-ui, sans-serif;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--on-ink);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-pill);
+  padding: 9px 20px;
+  cursor: pointer;
+  transition: transform var(--dur) var(--ease-spring), box-shadow var(--dur) var(--ease-spring),
+    background var(--dur-fast) var(--ease-swift);
+}
+
+.primary-pill:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lift);
+  background: var(--accent-deep);
+}
+
+.primary-pill:active:not(:disabled) {
+  transform: scale(.97);
+}
+
+.primary-pill:disabled {
+  background: var(--muted-soft);
+  border-color: var(--muted-soft);
+  cursor: not-allowed;
+}
+
+.sandbox-not-saved {
+  display: inline-block;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: var(--faint-soft);
+  border-radius: var(--r-pill);
+  padding: 5px 12px;
+  margin: 0 0 16px;
 }
 
 /* State messages */

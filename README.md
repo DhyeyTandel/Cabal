@@ -56,9 +56,11 @@ no database:
 | `GET` | `/api/plans/{id}/dissolve-suggestions` | Cabs that could be dissolved, ranked by money saved |
 | `POST` | `/api/plans/{id}/cabs/{cabNumber}/dissolve` | Dissolve one cab into its neighbours |
 | `GET` | `/healthz` | Liveness plus a database check |
+| `POST` | `/api/sandbox/plan` | Public try-it planning: up to 40 riders, nothing saved, no key needed |
 
 When `CABAL_API_KEY` is set (always, in production), every request that changes data
-needs an `X-API-Key` header. Reads never do.
+needs an `X-API-Key` header. Reads never do, and neither does the sandbox, which
+changes nothing.
 
 A fleet lists vehicle types with their prices: a fixed charge per trip and a charge
 per km, in whatever currency you use. Omit `available` for as many as needed:
@@ -451,9 +453,16 @@ timed with the traffic at the hour it is driven.
 ## Deployment
 
 It is set up to run at **https://cabal.dhyeytandel.in** on a home server: a ThinkPad
-P51 on Ubuntu 26.04, reached through a Cloudflare Tunnel. The page at `/` is a read-only
-map of the demo plans; anyone can read the API, and only the API key holder can change
-anything.
+P51 on Ubuntu 26.04, reached through a Cloudflare Tunnel. The page at `/` has two tabs:
+
+- **Demo plans:** the seeded 07:30 pickup and 22:00 drop, drawn on a map with every
+  cab's route, vehicle, cost and each rider's ETA and window.
+- **Try it:** visitors drop up to 40 riders on the map (or add 20 at random), pick a
+  shift and a fleet, and the real engine plans it on the server in well under a
+  second. Nothing is saved.
+
+Anyone can read the API and use the sandbox; only the API key holder can change
+stored data.
 
 ```bash
 deploy/deploy.sh --setup --seed   # first time: Java, PostgreSQL, user, secrets, service, demo data
@@ -493,6 +502,12 @@ the machine. The database pool is 5 connections and Tomcat 20 threads.
   does reach `/api/offices`. Tested against the real server.
 - A plan can hold at most 300 riders in production, so no single request can tie up
   the CPU (2,000 riders take about 12 s).
+- The public sandbox is exempt from the key on exactly one raw path,
+  `/api/sandbox/plan`; any other spelling still needs the key (tested: trailing slash,
+  doubled slash, encoded letter, `..`). It never touches the database, takes at most 40
+  riders within 25 km, rejects bodies over 32 KB (413) or of undeclared length (411)
+  before anything parses them, allows 10 plans per minute per visitor and 2 at once
+  (429 with `Retry-After` beyond that).
 - The page inserts all API data with `textContent`, never `innerHTML`. Leaflet is
   pinned with subresource integrity hashes.
 - The service runs as a no-login `cabal` user under systemd sandboxing (read-only

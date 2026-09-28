@@ -366,3 +366,46 @@ marks misses. Built by a Sonnet worker; verified by the orchestrator.
 
 **Scale/limits** — No extra work for riders without a window. A window that even a
 solo cab cannot meet is reported, not solved.
+
+## [2026-09-28] Let visitors try the planner on the public site
+
+**Problem** — The deployed page only showed two pre-computed plans, so to a recruiter
+it could have been a static site. The user wanted visitors to be able to run the
+engine themselves.
+
+**Options considered**
+- Keep it read-only. Rejected by the user: it does not show that the engine is live.
+- Let visitors create real plans with a public key or none. Rejected: every stored
+  write would become public and abusable.
+- A public, stateless sandbox endpoint with tight limits. Chosen.
+
+**Decision** — `POST /api/sandbox/plan` runs `ShiftPlan.create` in memory for a fixed
+office and demo date and returns the plan; nothing is persisted. The API key filter
+exempts exactly that raw URI and no other spelling (it fails closed). Limits: 40
+riders within 25 km, 10 plans per minute per client (`CF-Connecting-IP`, trustworthy
+because the app only listens on 127.0.0.1 behind the tunnel), 2 at once, 429 with
+`Retry-After` beyond. The page gains a "Try it" tab (drop pins or add 20 random, pick
+shift and fleet, plan) that reuses the demo renderer. Built by a Sonnet worker; the
+body-size filter below was added in review.
+
+**Tradeoff accepted**
+- Anyone can make the server compute small plans; the rate and concurrency limits and
+  the 40-rider cap bound the cost.
+- Rate-limit state is in memory, so it resets on restart and is per instance.
+- Pins placed by hand are never marked as women, so the escort rule only shows up with
+  random riders.
+
+**What went wrong**
+- Review found that Spring parses the whole JSON body before the controller, so the
+  40-rider cap and the rate limit only applied after parsing, and no body size was
+  capped. One large request could have exhausted the 256 MB heap and put the service
+  in a restart loop. Added `SandboxRequestLimitFilter`: over 32 KB is refused with 413
+  and an undeclared length with 411, before any parsing. Verified live: a 102 KB body
+  got 413 and a chunked one 411.
+- Verified live in the prod profile: sandbox without a key 200 with database row counts
+  unchanged; `/api/sandbox/plan/`, `//api/sandbox/plan`, `/api/sandbox/%70lan`,
+  `/api/sandbox/plan/../../offices` and `/api/offices` all 401 without a key; 10
+  requests then 429 with `Retry-After: 30` for one client while another was served.
+
+**Scale/limits** — At most 2 concurrent sandbox plans of at most 40 riders each, each
+taking milliseconds.

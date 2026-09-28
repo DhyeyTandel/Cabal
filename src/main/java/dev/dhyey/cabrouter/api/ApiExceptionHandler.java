@@ -7,9 +7,11 @@ import dev.dhyey.cabrouter.routing.NoSuchCabException;
 import dev.dhyey.cabrouter.routing.NotOnPlanException;
 import dev.dhyey.cabrouter.service.InvalidRequestException;
 import dev.dhyey.cabrouter.service.NotFoundException;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
+import org.springframework.http.ResponseEntity;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -59,5 +61,13 @@ public class ApiExceptionHandler {
     ProblemDetail concurrentEdit(ObjectOptimisticLockingFailureException e) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT,
                 "the plan was changed by another request; reload it and retry");
+    }
+
+    /** SandboxGuard rejected the request over its rate or concurrency limit: retry shortly. */
+    @ExceptionHandler(SandboxBusyException.class)
+    ResponseEntity<ProblemDetail> sandboxBusy(SandboxBusyException e) {
+        ProblemDetail detail = ProblemDetail.forStatusAndDetail(HttpStatus.TOO_MANY_REQUESTS,
+                "the demo is busy, try again in a minute");
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).header(HttpHeaders.RETRY_AFTER, "30").body(detail);
     }
 }
