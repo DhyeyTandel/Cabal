@@ -475,3 +475,53 @@ the orchestrator.
 
 **Scale/limits** — Unchanged from the sandbox entry, except 3 concurrent plans and at
 most 10 waiting.
+
+## [2026-09-28] Fix the live page's map-scroll trap and washed-out tiles
+
+**Problem** — The user reported the live UI as "very bad". Inspecting the deployed
+page (desktop, mobile, dark mode, Try it) rather than guessing: the layout mechanics
+were sound (grid columns, responsive breakpoints, no real overflow), but two things
+were genuinely broken and one was under-baked. Scrolling the page with the mouse
+wheel over the map zoomed the map instead of moving the page, because Leaflet's
+`scrollWheelZoom` defaults on; a `window.scrollTo` sanity check showed the page could
+scroll fine everywhere except over the map. The map tile filter used
+`brightness(1.03) contrast(.92)` on top of grayscale/sepia, which washed street names
+and road hierarchy out close to illegible. The page also read as thin before the map:
+64/48px of header padding and 40px between every pill row, on top of a 480px map,
+pushed the actual proof of the algorithm well below the fold on a common laptop.
+
+**Options considered**
+- Rewrite the palette/typography. Rejected: the cream/orange/serif system is the
+  owner's own personal brand (see the dhyey-design-system skill), not an accident, and
+  nothing about it was reported as broken; changing it would fight a deliberate choice
+  rather than fix one.
+- For the scroll trap: disable `scrollWheelZoom` outright (loses in-page zoom), or
+  enable it on hover (still traps a scroll-past), or enable it only after a click
+  inside the map and disable again on mouseleave. Chose click-to-activate: the same
+  pattern most embedded-map sites use, and the only one of the three that does not
+  reproduce the original bug.
+
+**Decision** — `scrollWheelZoom: false` at map creation; a `click` listener enables it
+(reusing the existing map click handler, a no-op outside sandbox mode) and a
+`mouseleave` on `.map-frame` disables it again. Tile filter changed to
+`sepia(.12) brightness(.97) contrast(1.12)` (dark: `sepia(.2) brightness(.88)
+contrast(1.08)`), trading the brightness boost for a contrast boost. Route line
+weight raised 3 to 4 (selected 5 to 6) so routes stay legible against the now-crisper
+base map. Map height 480 to 560 desktop / 360 mobile, with a new 420px step at the
+860px layout breakpoint; header padding and pill-row margins trimmed by about 12px
+each. No HTML changes, no test changes: this is presentation only.
+
+**Tradeoff accepted** — Click-to-activate means a first-time visitor who tries to
+scroll-zoom the map without clicking first gets nothing until they click once; the
+`+`/`-` buttons remain available immediately as the discoverable alternative.
+
+**What went wrong** — The first version enabled `scrollWheelZoom` on `mouseenter`
+rather than `click`. That reproduces the exact bug it was meant to fix: the cursor
+enters the map the instant it is scrolled past, so the wheel event is captured before
+the page ever scrolls. Caught by re-reading the two listeners against the stated goal
+before it was ever shown as finished, and corrected to `click` + `mouseleave`; verified
+afterwards by measuring `window.scrollY` before and after a wheel event at the same
+coordinate with and without a prior click (0 to 600 without enabling; 0 and unchanged
+after enabling), not by trusting the code alone.
+
+**Scale/limits** — n/a; static asset changes only.

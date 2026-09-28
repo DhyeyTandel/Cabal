@@ -484,7 +484,13 @@ function ensureMap(office) {
   if (map) {
     return;
   }
-  map = L.map("map").setView([office.latitude, office.longitude], 11);
+  // scrollWheelZoom starts off: a map that captures the mouse wheel makes the page
+  // itself un-scrollable the moment the cursor passes over it while scrolling past.
+  // It turns on only after a click inside the map (a deliberate "I want to use this
+  // map now" signal), and off again the moment the cursor leaves it, so scrolling
+  // past the map normally is never hijacked, but a visitor who clicks in can still
+  // zoom with the wheel as expected.
+  map = L.map("map", { scrollWheelZoom: false }).setView([office.latitude, office.longitude], 11);
   // OpenStreetMap's own tiles: no key, attribution required. Light use like a demo
   // page is within the OSM tile usage policy.
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -492,6 +498,8 @@ function ensureMap(office) {
     maxZoom: 19,
   }).addTo(map);
   map.on("click", onSandboxMapClick);
+  map.on("click", () => map.scrollWheelZoom.enable());
+  document.querySelector(".map-frame").addEventListener("mouseleave", () => map.scrollWheelZoom.disable());
 }
 
 /**
@@ -544,7 +552,7 @@ function renderMap(plan, office, opts = {}) {
     for (const point of points) {
       allPoints.push(point);
     }
-    const polyline = L.polyline(points, { color: mutedSoft, weight: 3 }).addTo(map);
+    const polyline = L.polyline(points, { color: mutedSoft, weight: 4, opacity: 0.85 }).addTo(map);
     routeLayers.set(cab.cabNumber, polyline);
 
     for (const stop of cab.stops) {
@@ -568,10 +576,10 @@ function highlightRoute(cabNumber) {
   const accent = cssVar("--accent");
   for (const [number, layer] of routeLayers) {
     if (number === cabNumber) {
-      layer.setStyle({ color: accent, weight: 5 });
+      layer.setStyle({ color: accent, weight: 6, opacity: 1 });
       layer.bringToFront();
     } else {
-      layer.setStyle({ color: mutedSoft, weight: 3 });
+      layer.setStyle({ color: mutedSoft, weight: 4, opacity: 0.85 });
     }
   }
 }

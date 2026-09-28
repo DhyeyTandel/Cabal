@@ -132,7 +132,7 @@ a:hover {
 /* Header */
 
 .site-header {
-  padding: 64px 0 48px;
+  padding: 56px 0 40px;
 }
 
 .display-hero {
@@ -154,7 +154,7 @@ a:hover {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  margin: 0 0 40px;
+  margin: 0 0 28px;
 }
 
 .plan-pill {
@@ -369,13 +369,24 @@ a:hover {
 }
 
 #map {
-  height: 480px;
+  height: 560px;
   width: 100%;
+  cursor: grab;
+}
+
+#map:active {
+  cursor: grabbing;
+}
+
+@media (max-width: 860px) {
+  #map {
+    height: 420px;
+  }
 }
 
 @media (max-width: 640px) {
   #map {
-    height: 340px;
+    height: 360px;
   }
 }
 
@@ -584,12 +595,15 @@ a:hover {
 }
 
 /* OpenStreetMap tiles are bright and saturated; tone them into the cream palette so the
-   routes carry the colour. Dark mode inverts them to a warm near-black. */
+   routes carry the colour. The earlier brightness > 1 / contrast < 1 pairing washed
+   street names and road hierarchy out to near-illegible; contrast now goes up instead
+   of down, so the map reads as a legible reference again, not a grey smear. Dark mode
+   inverts to a warm near-black with the same correction. */
 #map .leaflet-tile-pane {
-  filter: grayscale(1) sepia(.18) brightness(1.03) contrast(.92);
+  filter: grayscale(1) sepia(.12) brightness(.97) contrast(1.12);
 }
 @media (prefers-color-scheme: dark) {
   #map .leaflet-tile-pane {
-    filter: invert(1) grayscale(1) sepia(.25) brightness(.82) contrast(.9);
+    filter: invert(1) grayscale(1) sepia(.2) brightness(.88) contrast(1.08);
   }
 }
