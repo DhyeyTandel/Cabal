@@ -525,3 +525,53 @@ coordinate with and without a prior click (0 to 600 without enabling; 0 and unch
 after enabling), not by trusting the code alone.
 
 **Scale/limits** — n/a; static asset changes only.
+
+## [2026-09-28] Pin the map and let the cab list scroll beside it
+
+**Problem** — The user reported the layout as broken, with a screenshot: scrolling
+down past the map on a plan with several cabs showed a large empty area on the left
+where the map used to be, while cab cards kept listing on the right. Cause: `.plan-detail`
+is a CSS grid with two columns; grid's default `align-items: stretch` makes every
+column match the height of the tallest one, so the short left column (summary + map)
+was being stretched to match the cab list's height and just showing empty background
+below the map. The user also asked for the page's skeleton to work like Uber's: map
+as the anchor, ride list as the thing that scrolls.
+
+**Options considered**
+- Cap the cab list's height and make it scroll internally within a box matched to the
+  map's height. Rejected: the map's rendered height (summary bar + map, both slightly
+  variable) is awkward to mirror in CSS without JS measuring it.
+- `align-items: start` alone. Fixes the empty-space bug but does not address the
+  "Uber skeleton" request; the map still scrolls out of view immediately.
+- `align-items: start` plus `position: sticky` on the map/summary column. Chosen: the
+  grid stops stretching (bug fixed) and the map stays anchored in view while the cab
+  list scrolls past beside it (matches the ask), with no JS needed.
+
+**Decision** — `.plan-detail { align-items: start }`; `.detail-main { position: sticky;
+top: 24px }`, gated to `min-width: 861px` (the layout's two-column breakpoint). Below
+860px the grid collapses to one column and detail-main sits directly above the cab
+list in normal flow, so sticky there would pin the map over the cards scrolling
+beneath it rather than beside them; confirmed by testing before gating it (see below).
+
+**Tradeoff accepted** — On very short desktop/tablet windows, the sticky map (roughly
+650px including the summary bar) can occupy most of the visible height while the list
+scrolls beside a mostly-fixed view. No layout only degrades to something worse than
+before; the pre-existing responsive `#map` height steps already shrink the map on
+narrower viewports.
+
+**What went wrong**
+- The first version applied `position: sticky` unconditionally. On a 375px mobile
+  viewport this pinned the summary bar and map on top of the cab cards as they
+  scrolled underneath, cutting off card titles and the last stop of each card behind
+  the map's bottom edge. Caught by testing mobile immediately after the desktop
+  screenshot looked right, not assumed safe from the desktop result alone; fixed by
+  scoping sticky to the two-column breakpoint.
+- After editing app.css, the running `mvn spring-boot:run` process kept serving the
+  old file: Maven only copies `src/main/resources` into `target/classes` as part of a
+  build goal, not on every request, so a plain resource edit needs a restart (or
+  `mvn resources:resources`) to take effect. The stale build produced the exact same
+  mobile overlap as before the fix, which briefly looked like the media-query change
+  had not worked; confirmed the served `/app.css` still had the old rule, then
+  restarted.
+
+**Scale/limits** — n/a; static asset changes only.

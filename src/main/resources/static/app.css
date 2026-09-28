@@ -306,21 +306,39 @@ a:hover {
 
 /* Plan detail layout */
 
+/* An app panel, not two document columns: align-items:start stops grid's default
+   behaviour of stretching both columns to match whichever is taller, which used to
+   leave a slab of empty background under a short map whenever the cab list (right
+   column) ran longer than the map (left). detail-main is sticky instead, so the map
+   stays anchored in view while the cab list scrolls past beside it, the way a map
+   stays put next to a scrolling ride list in Uber's booking screen. */
 .plan-detail {
   display: grid;
   grid-template-columns: 1fr 340px;
+  align-items: start;
   gap: 24px;
   padding-bottom: 96px;
+}
+
+.detail-main {
+  min-width: 0;
+}
+
+/* Sticky only makes sense beside a second column: below 860px the grid collapses to
+   one column and detail-main sits directly above the cab list in normal document
+   flow, so pinning it would overlap the cards scrolling underneath instead of
+   sitting beside them. */
+@media (min-width: 861px) {
+  .detail-main {
+    position: sticky;
+    top: 24px;
+  }
 }
 
 @media (max-width: 860px) {
   .plan-detail {
     grid-template-columns: 1fr;
   }
-}
-
-.detail-main {
-  min-width: 0;
 }
 
 /* Summary metrics */
