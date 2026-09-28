@@ -198,10 +198,10 @@ matched the baseline, and planning time stayed within noise (1,000 riders: 3.84 
 
 **Scale/limits** — Unchanged.
 
-## [2026-09-28] Make Cabal deployable on the ThinkPad behind a Cloudflare Tunnel
+## [2026-09-28] Make Cabal deployable on a small server behind a Cloudflare Tunnel
 
-**Problem** — The user wants Cabal live as a website on their home server (ThinkPad
-P51, Ubuntu 26.04, 14 GB RAM, shared with Immich) without it being heavy. The app had
+**Problem** — The user wants Cabal live as a website on a small Linux server [redacted:
+server details] that also runs other services, without it being heavy. The app had
 no web page, no protection for writes, no production settings and no deployment path,
 and anyone reaching a public copy could have created 2,000-rider plans at about 12 s
 of CPU each.
@@ -211,8 +211,8 @@ of CPU each.
   Docker is not installed on the Mac, so the setup could not be tested here. Plain
   systemd plus an apt PostgreSQL could be syntax-checked locally and matched the
   server's existing systemd use.
-- Port forwarding on the home router. Rejected: Indian home broadband is usually
-  behind carrier-grade NAT, and it would expose the home IP. The user already runs a
+- Opening an inbound port. Rejected: it may not be possible behind carrier-grade NAT,
+  and it would expose the server's IP address. The user already runs a
   Cloudflare Tunnel, so a hostname ingress rule was chosen.
 - Self-hosting OSRM, now that RAM is plentiful. Deferred: several GB and extra moving
   parts before the demo needs real road times.
@@ -230,12 +230,13 @@ of CPU each.
   shutdown, compression, a 300-rider cap, and a required API key.
 - An API key filter on every non-read request, `/healthz`, `GET /api/plans`, and a
   read-only Leaflet map page in the owner's design system.
-- Immich is never routed through the tunnel and setup never touches it.
+- Other services on the machine are never routed through the tunnel, and setup never
+  touches them.
 - The app side was built by a Sonnet worker from a spec; the server side was written
   by the orchestrator because it runs as root on the user's machine.
 
 **Tradeoff accepted**
-- The site is only up while the laptop is on and online.
+- The site is only up while the server is on and online.
 - Deploys need the server's sudo password, so the user runs them; the assistant cannot.
 - Static files revalidate on every page load (a 304 when unchanged) instead of being
   cached, trading a round trip for never serving stale JavaScript after a deploy.
@@ -409,3 +410,68 @@ body-size filter below was added in review.
 
 **Scale/limits** — At most 2 concurrent sandbox plans of at most 40 riders each, each
 taking milliseconds.
+
+## [2026-09-28] Redaction of home-setup details (one-time exception to append-only)
+
+**Problem** — The repository is public so recruiters can read the code, and the
+deployment entry above described the owner's home server hardware, the other services
+on it and their home network.
+
+**Options considered**
+- Leave earlier entries untouched, as this log's append-only rule requires.
+- Redact those details in place and record the exception here. Chosen by the user.
+
+**Decision** — Edited the entry "Make Cabal deployable on a small server behind a
+Cloudflare Tunnel" in place: its title, the server description in its problem
+statement, the inbound-port option, the rule about other services and the uptime note.
+Nothing else in any entry changed, and no reasoning was removed, only identifying
+details.
+
+**Tradeoff accepted** — This log is no longer strictly append-only. The original
+wording remains in the git history, which was not rewritten.
+
+**What went wrong** — nothing.
+
+**Scale/limits** — n/a.
+
+## [2026-09-28] Fix stress-test and live-site findings
+
+**Problem** — A stress test and the first live check found: over-long names gave 500;
+the sandbox refused nearly everyone during a burst (3 of 400 served); no browser
+security headers; `/error` requested directly gave 500 with status 999; on the live
+page the "not saved" label showed on the Demo plans tab and the map opened at zoom 19;
+and the tunnel instructions assumed a locally configured tunnel when the real one is
+dashboard-managed.
+
+**Options considered**
+- For the sandbox burst: raise the concurrency limit alone (more CPU per burst, same
+  instant rejections), or let requests wait briefly for a slot. Chose 3 at once plus a
+  2-second wait for at most 10 waiters.
+- For headers: rely on Cloudflare settings, or set them in the app. Chose the app, so
+  they apply whatever sits in front, plus HSTS in Cloudflare.
+
+**Decision** — `@Size(max = 120)` on names; `SandboxGuard` with 3 concurrent, 2 s wait,
+10 waiters; a `SecurityHeadersFilter` (CSP limited to self, the Leaflet CDN, Google
+Fonts and OpenStreetMap tiles, plus nosniff, frame denial, referrer and permissions
+policies) ordered first so rejections carry them too; an `ApiErrorController` that
+never exposes exception details; the label and map fixes (`invalidateSize` then
+`fitBounds` with maxZoom 13 once the container is visible); `deploy/cloudflare-tunnel.md`
+for the dashboard-managed tunnel. Built by a Sonnet worker, reviewed and adjusted by
+the orchestrator.
+
+**Tradeoff accepted**
+- Bursts are still mostly refused: 50 simultaneous plans get 13 served (3 computing +
+  10 waiting) and 37 "busy"; 400 over a short burst got 14. Admitting more would tie
+  up Tomcat's 20 request threads.
+- The CSP forbids inline scripts and styles, so future page changes must stay in
+  app.js and app.css.
+
+**What went wrong**
+- The worker set the waiter cap to 20, equal to Tomcat's 20 request threads, so a
+  flood of waiting sandbox requests could have held every thread for 2 s and stalled
+  ordinary page loads. Lowered to 10 in review.
+- The map bug did not show on localhost earlier, only over the real network: the fit
+  ran while the container still had no size, which depends on timing.
+
+**Scale/limits** — Unchanged from the sandbox entry, except 3 concurrent plans and at
+most 10 waiting.

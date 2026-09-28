@@ -283,14 +283,14 @@ function onSandboxMapClick(e) {
 
 /** The raw input pins: office plus one marker per rider, click to remove, no routes yet. */
 function renderSandboxPins() {
-  ensureMap();
+  const office = sandboxOffice();
+  ensureMap(office);
   clearRouteAndMarkerLayers();
   if (sandboxPinLayer) {
     map.removeLayer(sandboxPinLayer);
   }
   sandboxPinLayer = L.layerGroup().addTo(map);
 
-  const office = sandboxOffice();
   const officeMarker = L.marker([office.latitude, office.longitude], { icon: officeIcon() });
   officeMarker.bindPopup(buildOfficePopup(office));
   officeMarker.addTo(sandboxPinLayer);
@@ -302,7 +302,7 @@ function renderSandboxPins() {
     marker.addTo(sandboxPinLayer);
     allPoints.push([rider.lat, rider.lng]);
   }
-  map.fitBounds(allPoints, { padding: [32, 32] });
+  fitMapToPoints(allPoints);
 }
 
 async function runSandboxPlan() {
@@ -480,14 +480,11 @@ function buildOfficePopup(office) {
   return wrap;
 }
 
-function ensureMap() {
+function ensureMap(office) {
   if (map) {
-    // Switching modes can hide and re-show the map's container; Leaflet caches the last
-    // known size, so refresh it in case that happened.
-    map.invalidateSize();
     return;
   }
-  map = L.map("map");
+  map = L.map("map").setView([office.latitude, office.longitude], 11);
   // OpenStreetMap's own tiles: no key, attribution required. Light use like a demo
   // page is within the OSM tile usage policy.
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -495,6 +492,19 @@ function ensureMap() {
     maxZoom: 19,
   }).addTo(map);
   map.on("click", onSandboxMapClick);
+}
+
+/**
+ * After the plan detail section is visible, refreshes the map's cached size and fits it to
+ * `points`. Deferred to the next animation frame so layout has settled in case the container
+ * was just un-hidden; running invalidateSize/fitBounds against a hidden or zero-sized
+ * container is what used to leave the map at the tile layer's max zoom.
+ */
+function fitMapToPoints(points) {
+  requestAnimationFrame(() => {
+    map.invalidateSize();
+    map.fitBounds(points, { padding: [24, 24], maxZoom: 13 });
+  });
 }
 
 function clearRouteAndMarkerLayers() {
@@ -513,7 +523,7 @@ function clearRouteAndMarkerLayers() {
  * called instead of opening a popup, so a rider pin stays click-to-remove after planning.
  */
 function renderMap(plan, office, opts = {}) {
-  ensureMap();
+  ensureMap(office);
   if (sandboxPinLayer) {
     map.removeLayer(sandboxPinLayer);
     sandboxPinLayer = null;
@@ -549,7 +559,7 @@ function renderMap(plan, office, opts = {}) {
   }
 
   if (allPoints.length > 0) {
-    map.fitBounds(allPoints, { padding: [32, 32] });
+    fitMapToPoints(allPoints);
   }
 }
 

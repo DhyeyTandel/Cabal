@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build Cabal on this Mac and ship it to the ThinkPad over SSH (Tailscale).
+# Build Cabal on this Mac and ship it to the server over SSH.
 #
 #   deploy/deploy.sh            build, test, upload, restart (rolls back if unhealthy)
 #   deploy/deploy.sh --setup    first time: also install Java/PostgreSQL, the cabal user,
@@ -7,11 +7,11 @@
 #   deploy/deploy.sh --seed     after deploying, load the demo data if there are no plans
 #
 # Flags combine: deploy/deploy.sh --setup --seed
-# Target host: DEPLOY_HOST (default thinkpad@thinkpad-server). You will be asked for the
-# server's sudo password once.
+# Target host: DEPLOY_HOST (required, e.g. user@your-server; set it in your shell
+# profile, not in this repo). You will be asked for the server's sudo password once.
 set -euo pipefail
 
-HOST=${DEPLOY_HOST:-thinkpad@thinkpad-server}
+HOST=${DEPLOY_HOST:?set DEPLOY_HOST to user@host of the server, for example in your shell profile}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 REMOTE=/tmp/cabal-release
 SETUP=0

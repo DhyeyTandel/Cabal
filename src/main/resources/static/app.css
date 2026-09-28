@@ -278,7 +278,7 @@ a:hover {
   cursor: not-allowed;
 }
 
-.sandbox-not-saved {
+.sandbox-not-saved:not([hidden]) {
   display: inline-block;
   font-family: "JetBrains Mono", ui-monospace, monospace;
   font-size: 11px;

@@ -452,8 +452,8 @@ timed with the traffic at the hour it is driven.
 
 ## Deployment
 
-It is set up to run at **https://cabal.dhyeytandel.in** on a home server: a ThinkPad
-P51 on Ubuntu 26.04, reached through a Cloudflare Tunnel. The page at `/` has two tabs:
+It runs at **https://cabal.dhyeytandel.in** on a small Linux server, reached through a
+Cloudflare Tunnel. The page at `/` has two tabs:
 
 - **Demo plans:** the seeded 07:30 pickup and 22:00 drop, drawn on a map with every
   cab's route, vehicle, cost and each rider's ETA and window.
@@ -465,12 +465,13 @@ Anyone can read the API and use the sandbox; only the API key holder can change
 stored data.
 
 ```bash
-deploy/deploy.sh --setup --seed   # first time: Java, PostgreSQL, user, secrets, service, demo data
-deploy/deploy.sh                  # every release after that
+export DEPLOY_HOST=user@your-server   # e.g. in your shell profile; kept out of this repo
+deploy/deploy.sh --setup --seed      # first time: Java, PostgreSQL, user, secrets, service, demo data
+deploy/deploy.sh                     # every release after that
 ```
 
-`deploy.sh` builds and tests on the Mac, copies the jar to the server over SSH
-(Tailscale), restarts the service, and rolls back to the previous jar if the new one
+`deploy.sh` builds and tests on the Mac, copies the jar to the server over SSH,
+restarts the service, and rolls back to the previous jar if the new one
 does not answer `/healthz` within 90 seconds. It asks for the server's sudo password
 once. Everything it installs lives in `deploy/`:
 
@@ -480,7 +481,7 @@ once. Everything it installs lives in `deploy/`:
 | `setup-server.sh` | Server, once | Java, PostgreSQL, `cabal` user, database, secrets in `/etc/cabal/cabal.env`, systemd unit. Safe to rerun; keeps existing secrets |
 | `install-release.sh` | Server | Swap the jar, restart, health-check, roll back on failure, optional demo seed |
 | `cabal.service` | Server | The systemd unit |
-| `cloudflared-ingress.yml` | Server | The one tunnel rule to add |
+| `cloudflare-tunnel.md` | Reference | How to add the dashboard-managed tunnel route |
 
 **Kept light.** Measured on this Mac with the demo plus a 500-rider plan:
 
@@ -495,7 +496,7 @@ the machine. The database pool is 5 connections and Tomcat 20 threads.
 
 **Safe to expose.**
 - The app listens on `127.0.0.1` only. The Cloudflare Tunnel is the only way in, so no
-  router port is open and the home IP is not published.
+  inbound port is open and the server's IP address is not published.
 - Every request that could change data (any method other than GET, HEAD or OPTIONS,
   on any path) needs `X-API-Key`. The check is deliberately not a path prefix: the raw
   request URI can differ from the path Spring routes on, and `/%61pi/offices` really
@@ -506,16 +507,23 @@ the machine. The database pool is 5 connections and Tomcat 20 threads.
   `/api/sandbox/plan`; any other spelling still needs the key (tested: trailing slash,
   doubled slash, encoded letter, `..`). It never touches the database, takes at most 40
   riders within 25 km, rejects bodies over 32 KB (413) or of undeclared length (411)
-  before anything parses them, allows 10 plans per minute per visitor and 2 at once
-  (429 with `Retry-After` beyond that).
+  before anything parses them, allows 10 plans per minute per visitor and 3 at once,
+  with up to 10 more waiting at most 2 seconds for a slot (429 with `Retry-After`
+  beyond that). The waiting cap is kept well under Tomcat's 20 request threads, so a
+  sandbox flood can never occupy every thread and stall ordinary page loads.
 - The page inserts all API data with `textContent`, never `innerHTML`. Leaflet is
   pinned with subresource integrity hashes.
 - The service runs as a no-login `cabal` user under systemd sandboxing (read-only
   system, no home access, no new privileges, no capabilities).
+- Every response carries a Content-Security-Policy (only this site, the Leaflet CDN,
+  Google Fonts and OpenStreetMap tiles), `nosniff`, frame blocking, a referrer policy
+  and a permissions policy. Error responses never include exception details, and
+  `/error` requested directly is a plain 404.
+- Names longer than their database columns are rejected with 400 before reaching the
+  database.
 
-**What else is on the machine.** Immich (a private photo server) shares the ThinkPad.
-It stays Tailscale-only and is never routed through the tunnel; setup never touches it
-or its containers.
+**Other services on the machine.** The server runs other things too. None of them are
+routed through the tunnel, and setup never touches them.
 
 OSRM is off in production: the straight-line model needs no extra memory. It can be
 switched on later with `TRAVEL_MODEL=osrm` and a self-hosted OSRM (see

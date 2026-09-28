@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs on the ThinkPad as root, called by deploy.sh. Swaps in the new jar, restarts the
+# Runs on the server as root, called by deploy.sh. Swaps in the new jar, restarts the
 # service, and rolls back to the previous jar if the new one is not healthy within 90 s.
 #
 # Usage: install-release.sh [--seed]

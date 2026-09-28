@@ -1,10 +1,10 @@
-# Cabal on the ThinkPad: installed to /etc/systemd/system/cabal.service by setup-server.sh.
+# Cabal on the server: installed to /etc/systemd/system/cabal.service by setup-server.sh.
 #
-# Kept deliberately light and fenced off, because it shares the machine with Immich:
+# Kept deliberately light and fenced off, because it shares the machine with other services:
 # - JVM: 256 MB heap cap, serial GC (least overhead on a small, mostly idle service),
 #   capped metaspace and code cache, 2 JIT threads. Measured at roughly 250 to 300 MB.
 # - cgroup: MemoryMax is a hard ceiling for the whole process, JVM overhead included;
-#   CPUWeight below the default means Immich wins whenever both are busy.
+#   CPUWeight below the default means other services win whenever both are busy.
 # - It only listens on 127.0.0.1 (see application-prod.properties); the Cloudflare
 #   tunnel is the only way in from outside.
 

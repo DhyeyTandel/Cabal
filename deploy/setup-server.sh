@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-time setup of Cabal on the ThinkPad (Ubuntu, systemd). Run as root; deploy.sh
+# One-time setup of Cabal on the server (Ubuntu or Debian, systemd). Run as root; deploy.sh
 # --setup does this for you. Safe to run again: existing secrets and databases are kept.
 #
 # What it does:
@@ -10,7 +10,7 @@
 #      by root and the cabal group
 #   5. installs and enables the systemd unit (deploy.sh starts it once a jar is in place)
 #
-# What it never does: touch Docker, Immich, its containers or its database, open
+# What it never does: touch Docker, containers or any other service and its data, open
 # firewall ports, or change the cloudflared config.
 set -euo pipefail
 
@@ -119,9 +119,8 @@ App port:  $PORT (listens on 127.0.0.1 only)
 API key:   stored in $ENV_FILE as CABAL_API_KEY
            read it with: sudo grep CABAL_API_KEY $ENV_FILE
 
-Cloudflare Tunnel: add this rule to the cloudflared config, above the final catch-all,
-then restart cloudflared (see deploy/cloudflared-ingress.yml):
-
-  - hostname: cabal.dhyeytandel.in
-    service: http://127.0.0.1:$PORT
+Cloudflare Tunnel: this tunnel is dashboard-managed, so there is no local config
+file to edit. Add the route in the Cloudflare dashboard instead (Networks > Tunnels
+> the tunnel > Published application routes > Add: subdomain cabal, domain
+dhyeytandel.in, type HTTP, URL 127.0.0.1:$PORT). See deploy/cloudflare-tunnel.md.
 EOF
