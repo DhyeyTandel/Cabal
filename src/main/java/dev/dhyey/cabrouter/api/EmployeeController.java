@@ -2,6 +2,7 @@ package dev.dhyey.cabrouter.api;
 
 import dev.dhyey.cabrouter.api.dto.CreateEmployeeRequest;
 import dev.dhyey.cabrouter.api.dto.EmployeeResponse;
+import dev.dhyey.cabrouter.api.dto.TimeWindowRequest;
 import dev.dhyey.cabrouter.service.DirectoryService;
 import jakarta.validation.Valid;
 import java.net.URI;
@@ -9,6 +10,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -32,5 +34,10 @@ public class EmployeeController {
     @GetMapping("/{id}")
     public EmployeeResponse get(@PathVariable long id) {
         return directory.getEmployee(id);
+    }
+
+    @PutMapping("/{id}/time-window")
+    public EmployeeResponse setTimeWindow(@PathVariable long id, @RequestBody TimeWindowRequest req) {
+        return directory.setTimeWindow(id, req.earliestPickup(), req.latestDrop());
     }
 }

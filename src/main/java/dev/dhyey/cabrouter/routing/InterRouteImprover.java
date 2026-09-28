@@ -20,8 +20,9 @@ import java.util.Set;
  * </ul>
  *
  * A move is accepted only if it reduces total cost (vehicle trip and km charges, plus
- * guards), keeps every multi-person cab within the ride limit, and does not add
- * escort-flagged cabs. Emptying a cab saves its whole trip charge. Only each cab's nearest
+ * guards), keeps every multi-person cab within the ride limit and every rider's
+ * time-window preference, and does not add escort-flagged cabs. Emptying a cab saves its
+ * whole trip charge. Only each cab's nearest
  * neighbours (by centroid) are tried, which keeps a pass roughly linear in the number
  * of cabs.
  */
@@ -200,7 +201,8 @@ final class InterRouteImprover {
     }
 
     private static boolean withinRideLimit(PlannedCab cab, RoutingParams params) {
-        return cab == null || cab.stops().size() == 1 || cab.maxRideMinutes() <= params.maxRideMinutes();
+        return cab == null || cab.stops().size() == 1
+                || (cab.maxRideMinutes() <= params.maxRideMinutes() && cab.timetable().meetsWindows());
     }
 
     private static int escorts(PlannedCab cab) {

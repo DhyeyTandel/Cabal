@@ -27,8 +27,9 @@ final class CabBuilder {
      * farthest from the office (the first pickup, or the last drop). If the cab is there
      * at night and that rider is escort-sensitive, we try ending the route at each other
      * rider instead. We accept the cheapest reorder that stays within the detour
-     * tolerance and does not lengthen anyone's ride past the limit. If no reorder
-     * qualifies, the cab is flagged as needing a guard.
+     * tolerance, does not lengthen anyone's ride past the limit, and still honours every
+     * rider's time-window preference. If no reorder qualifies, the cab is flagged as
+     * needing a guard.
      */
     PlannedCab build(VehicleType vehicle, List<Stop> stops) {
         if (stops.isEmpty()) {
@@ -71,8 +72,8 @@ final class CabBuilder {
             candidate.add(anchor);
 
             double km = RouteMetrics.pathKm(travel, office, candidate);
-            double ride = Timetable.of(travel, office, candidate, params.shift(), params.dwellMinutes()).maxRideMinutes();
-            if (km <= bestKm + 1e-9 && ride <= rideLimit) {
+            Timetable timetable = Timetable.of(travel, office, candidate, params.shift(), params.dwellMinutes());
+            if (km <= bestKm + 1e-9 && timetable.maxRideMinutes() <= rideLimit && timetable.meetsWindows()) {
                 best = candidate;
                 bestKm = km;
             }

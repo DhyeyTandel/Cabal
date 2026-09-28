@@ -417,11 +417,34 @@ a:hover {
   white-space: nowrap;
 }
 
-.cab-card__stop-eta {
+.cab-card__stop-time {
+  display: flex;
   flex: none;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.cab-card__stop-eta {
   font-family: "JetBrains Mono", ui-monospace, monospace;
   font-size: 13px;
   color: var(--muted);
+}
+
+.cab-card__stop-window {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--muted-soft);
+}
+
+.cab-card__stop-window--missed {
+  color: var(--accent);
+}
+
+.cab-card__stop-window-flag {
+  text-transform: uppercase;
+  font-weight: 700;
+  letter-spacing: .06em;
 }
 
 /* Footer: the one dark ink-surface band on the page */

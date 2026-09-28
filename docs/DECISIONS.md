@@ -323,3 +323,46 @@ from a spec; the fleet-accounting fix below was made in review.
 **Scale/limits** — Per call: one travel request for the whole plan, then for each cab
 up to (riders × 6) cab rebuilds. At the 300-rider production cap (about 75 cabs) that
 is at most a few thousand small rebuilds.
+
+## [2026-09-28] Add employee time windows (earliest pickup, latest drop)
+
+**Problem** — Employees had no way to say "do not pick me up before 06:00" or "get me
+home by 23:15". The demo's 07:30 pickup had people collected at 05:43.
+
+**Options considered**
+- Per-shift windows on a booking. Rejected: the model has no bookings, and adding them
+  was out of scope for a same-day deploy.
+- Soft windows (a cost penalty). Rejected in favour of hard constraints, matching how
+  the ride limit already works.
+- A general time-window VRP with waiting at stops. Not needed: pickups are timed
+  backwards from arrival and drops forwards from departure, so both windows reduce to
+  a per-rider ride cap and fit the existing checks.
+
+**Decision** — Optional `earliestPickup` and `latestDrop` on the employee (V5), read
+live when a plan is built or edited; `PUT /api/employees/{id}/time-window` to change
+them. `Timetable` checks windows with the same rounded minute offset as the published
+ETAs, resolving windows across midnight, and only does date maths for stops that have
+a window. Enforced in the sweep (`Timetable.fits`), insertion, the inter-route search,
+the escort reorder and (through insertion) dissolving. A lone rider always gets a cab
+and is flagged `windowMissed` if even that misses. The response carries each stop's
+window and a plan-level `windowsMissed`; the page shows "after 06:00" / "by 23:15" and
+marks misses. Built by a Sonnet worker; verified by the orchestrator.
+
+**Tradeoff accepted**
+- Windows cost vehicles. On the demo 07:30 pickup: 5 cabs and 7,163 became 7 cabs and
+  8,317 (+16%) for three windows, one of which cannot be met anyway.
+- Preferences are standing, not per shift, and a change reaches an issued plan only at
+  its next edit.
+
+**What went wrong**
+- The saved demo baseline had been cleared from the scratch folder, so the
+  "no windows means no change" check had to rebuild a baseline by running the previous
+  commit in a separate clone on another port. Result: all 114 times identical.
+- The worker added `@JsonFormat(pattern = "HH:mm")` to every `LocalTime` field; without
+  it Jackson writes "06:00:00", contradicting the API contract.
+- Benchmark after the change: 1,000 riders 4.03 s (inside the 3.8 to 4.3 s spread seen
+  before); 2,000 riders 13.2 s against 12.4 to 12.8 s in recent runs, about 4% higher,
+  one run only. [unverified whether that is noise or the extra check]
+
+**Scale/limits** — No extra work for riders without a window. A window that even a
+solo cab cannot meet is reported, not solved.

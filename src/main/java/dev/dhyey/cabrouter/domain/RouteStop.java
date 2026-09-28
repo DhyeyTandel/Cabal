@@ -35,11 +35,13 @@ public class RouteStop {
     private double longitude;
     private LocalDateTime eta;
     private double rideMinutes;
+    private boolean windowMissed;
 
     protected RouteStop() {
     }
 
-    public RouteStop(CabRoute cab, Employee employee, int sequence, GeoPoint location, LocalDateTime eta, double rideMinutes) {
+    public RouteStop(CabRoute cab, Employee employee, int sequence, GeoPoint location, LocalDateTime eta,
+                     double rideMinutes, boolean windowMissed) {
         this.cab = cab;
         this.employee = employee;
         this.sequence = sequence;
@@ -47,6 +49,7 @@ public class RouteStop {
         this.longitude = location.lng();
         this.eta = eta;
         this.rideMinutes = rideMinutes;
+        this.windowMissed = windowMissed;
     }
 
     public GeoPoint location() {
@@ -67,5 +70,9 @@ public class RouteStop {
 
     public double getRideMinutes() {
         return rideMinutes;
+    }
+
+    public boolean isWindowMissed() {
+        return windowMissed;
     }
 }

@@ -108,8 +108,9 @@ public final class RoutePlanner {
      *   <li>send a new cab in the cheapest free vehicle.</li>
      * </ul>
      *
-     * Options that break the ride limit are skipped. An option that turns an escort-free
-     * cab into one needing a guard loses to any option that does not.
+     * Options that break the ride limit or a rider's time-window preference are skipped.
+     * An option that turns an escort-free cab into one needing a guard loses to any
+     * option that does not.
      *
      * @throws FleetExhaustedException if every option is infeasible or no vehicle is free
      */
@@ -194,7 +195,8 @@ public final class RoutePlanner {
             }
             for (VehicleType vehicle : vehicles) {
                 PlannedCab candidate = builder.build(vehicle, members);
-                if (candidate.maxRideMinutes() > params.maxRideMinutes()) {
+                if (candidate.maxRideMinutes() > params.maxRideMinutes()
+                        || !candidate.timetable().meetsWindows()) {
                     continue;
                 }
                 double score = params.cost(candidate) - params.cost(cab)

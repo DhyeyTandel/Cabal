@@ -8,6 +8,7 @@ import dev.dhyey.cabrouter.domain.Employee;
 import dev.dhyey.cabrouter.domain.EmployeeRepository;
 import dev.dhyey.cabrouter.domain.Office;
 import dev.dhyey.cabrouter.domain.OfficeRepository;
+import java.time.LocalTime;
 import java.util.List;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -36,8 +37,9 @@ public class DirectoryService {
 
     public EmployeeResponse createEmployee(CreateEmployeeRequest req) {
         Office office = findOffice(req.officeId());
-        Employee saved = employees.save(new Employee(req.name(), req.gender(), req.latitude(), req.longitude(), office));
-        return EmployeeResponse.from(saved);
+        Employee employee = new Employee(req.name(), req.gender(), req.latitude(), req.longitude(), office);
+        employee.setTimeWindow(req.earliestPickup(), req.latestDrop());
+        return EmployeeResponse.from(employees.save(employee));
     }
 
     @Transactional(readOnly = true)
@@ -53,7 +55,18 @@ public class DirectoryService {
         return employees.findByOfficeIdOrderById(officeId).stream().map(EmployeeResponse::from).toList();
     }
 
+    /** Sets an employee's standing time-window preferences; either may be null to clear it. */
+    public EmployeeResponse setTimeWindow(long id, LocalTime earliestPickup, LocalTime latestDrop) {
+        Employee employee = findEmployee(id);
+        employee.setTimeWindow(earliestPickup, latestDrop);
+        return EmployeeResponse.from(employee);
+    }
+
     private Office findOffice(long id) {
         return offices.findById(id).orElseThrow(() -> new NotFoundException("office " + id + " not found"));
+    }
+
+    private Employee findEmployee(long id) {
+        return employees.findById(id).orElseThrow(() -> new NotFoundException("employee " + id + " not found"));
     }
 }

@@ -9,9 +9,10 @@ import java.util.List;
  *
  * <p>Picture a ray from the office rotating like a clock hand. We sort employees by
  * their polar angle and fill cabs in that order. A cab is closed when it runs out of
- * seats, or when adding the next employee would push someone past the ride-time limit.
- * Each cab may grow to the largest vehicle still free in the fleet; when it closes, it
- * takes the smallest free vehicle that seats its riders.
+ * seats, or when adding the next employee would push someone past the ride-time limit
+ * or break a rider's time-window preference. Each cab may grow to the largest vehicle
+ * still free in the fleet; when it closes, it takes the smallest free vehicle that
+ * seats its riders.
  *
  * <p>A single sweep depends heavily on where the ray starts, so we try several start
  * angles in both rotational directions. With a mixed fleet, filling every cab up to
@@ -83,8 +84,8 @@ public final class SweepClusterer {
                     List<Stop> candidate = new ArrayList<>(current);
                     candidate.add(next);
                     List<Stop> route = sequencer.sequence(office, candidate);
-                    double ride = Timetable.maxRideMinutes(travel, office, route, params.shift(), params.dwellMinutes());
-                    if (ride <= params.maxRideMinutes()) {
+                    if (Timetable.fits(travel, office, route, params.shift(), params.dwellMinutes(),
+                            params.maxRideMinutes())) {
                         current = candidate;
                         currentRoute = route;
                         continue;
@@ -98,7 +99,7 @@ public final class SweepClusterer {
             if (seats == 0) {
                 return null;
             }
-            // A lone employee always gets a cab, even if the trip alone breaks the limit.
+            // A lone employee always gets a cab, even if the trip alone breaks the limit or their window.
             current.add(next);
             currentRoute = List.of(next);
         }

@@ -25,6 +25,14 @@ del() {
   fi
 }
 
+put() {
+  if [ -n "$API_KEY" ]; then
+    curl -sf -X PUT "$API$1" -H 'Content-Type: application/json' -H "X-API-Key: $API_KEY" ${2:+-d "$2"}
+  else
+    curl -sf -X PUT "$API$1" -H 'Content-Type: application/json' ${2:+-d "$2"}
+  fi
+}
+
 office=$(post /offices '{"name":"Manyata Tech Park","latitude":13.0475,"longitude":77.6206}' | jq .id)
 echo "office $office"
 
@@ -64,6 +72,12 @@ for h in "${homes[@]}"; do
 done
 late=${ids[23]}
 roster=$(printf '%s\n' "${ids[@]:0:23}" | jq -s -c .)
+
+# Standing time-window preferences: Lakshmi and Rohan won't be picked up before their
+# time, Vikram won't be dropped after his.
+put "/employees/${ids[20]}/time-window" '{"earliestPickup":"06:00","latestDrop":null}' >/dev/null
+put "/employees/${ids[13]}/time-window" '{"earliestPickup":"06:15","latestDrop":null}' >/dev/null
+put "/employees/${ids[7]}/time-window" '{"earliestPickup":null,"latestDrop":"23:15"}' >/dev/null
 
 summary='.direction as $d | "plan \(.id) rev \(.revision): \(.cabCount) cabs, \(.employeeCount) riders, \(.totalDistanceKm) km, cost \(.totalCost)",
   (.cabs[] | "  cab \(.cabNumber) \(.vehicleType) [\(.seatsUsed)/\(.seats) seats, \(.distanceKm) km, cost \(.cost), longest ride \(.maxRideMinutes) min\(if .escortRequired then ", ESCORT" else "" end)]: " +

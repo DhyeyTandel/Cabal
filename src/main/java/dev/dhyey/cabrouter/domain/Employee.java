@@ -10,6 +10,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import java.time.LocalTime;
 
 @Entity
 @Table(name = "employees")
@@ -31,6 +32,12 @@ public class Employee {
     @JoinColumn(name = "office_id")
     private Office office;
 
+    /** Standing preference, used on PICKUP plans: must not be picked up before this time. */
+    private LocalTime earliestPickup;
+
+    /** Standing preference, used on DROP plans: must be dropped by this time. */
+    private LocalTime latestDrop;
+
     protected Employee() {
     }
 
@@ -44,6 +51,12 @@ public class Employee {
 
     public boolean isEscortSensitive() {
         return gender == Gender.FEMALE;
+    }
+
+    /** Sets both standing time-window preferences at once; either may be null to clear it. */
+    public void setTimeWindow(LocalTime earliestPickup, LocalTime latestDrop) {
+        this.earliestPickup = earliestPickup;
+        this.latestDrop = latestDrop;
     }
 
     public Long getId() {
@@ -68,5 +81,13 @@ public class Employee {
 
     public Office getOffice() {
         return office;
+    }
+
+    public LocalTime getEarliestPickup() {
+        return earliestPickup;
+    }
+
+    public LocalTime getLatestDrop() {
+        return latestDrop;
     }
 }

@@ -1,6 +1,7 @@
 package dev.dhyey.cabrouter.routing;
 
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -61,6 +62,26 @@ public final class Timetable {
         return ride.length == 0 ? 0 : ride[ride.length - 1];
     }
 
+    /**
+     * Whether a route both stays within the ride limit and honours every stop's time
+     * window, without building a Timetable. Like {@link #maxRideMinutes}, this runs a
+     * single {@link #rideMinutes} walk; a route with no windowed stops does exactly that
+     * walk plus the ride-limit comparison, nothing more.
+     */
+    public static boolean fits(TravelModel travel, GeoPoint office, List<Stop> outward, ShiftContext shift,
+                               double dwell, double maxRideMinutes) {
+        double[] ride = rideMinutes(travel, office, outward, shift, dwell);
+        if (ride.length > 0 && ride[ride.length - 1] > maxRideMinutes) {
+            return false;
+        }
+        for (int k = 0; k < outward.size(); k++) {
+            if (!windowHolds(outward.get(k), ride, k, shift, dwell)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private static double[] rideMinutes(TravelModel travel, GeoPoint office, List<Stop> outward,
                                         ShiftContext shift, double dwellMinutes) {
         double[] ride = new double[outward.size()];
@@ -97,11 +118,11 @@ public final class Timetable {
             List<StopTiming> timings = new ArrayList<>(outward.size());
             if (shift.direction() == Direction.DROP) {
                 for (int k = 0; k < outward.size(); k++) {
-                    timings.add(new StopTiming(outward.get(k), etaFor(k), ride[k]));
+                    timings.add(new StopTiming(outward.get(k), etaFor(k), ride[k], !windowHolds(k)));
                 }
             } else {
                 for (int k = outward.size() - 1; k >= 0; k--) {
-                    timings.add(new StopTiming(outward.get(k), etaFor(k), ride[k]));
+                    timings.add(new StopTiming(outward.get(k), etaFor(k), ride[k], !windowHolds(k)));
                 }
             }
             drivingOrder = List.copyOf(timings);
@@ -112,6 +133,19 @@ public final class Timetable {
     /** The farthest stop always rides longest, so this is the last entry; 0 if no stops. */
     public double maxRideMinutes() {
         return ride.length == 0 ? 0 : ride[ride.length - 1];
+    }
+
+    /**
+     * True if every stop with a time-window preference is honoured by this route's ETAs.
+     * A stop with no window is skipped without doing any date maths.
+     */
+    public boolean meetsWindows() {
+        for (int k = 0; k < outward.size(); k++) {
+            if (!windowHolds(k)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
@@ -128,10 +162,68 @@ public final class Timetable {
         return etaFor(ride.length - 1);
     }
 
-    /** DROP stop k ETA = officeTime + round(ride[k]); PICKUP stop k ETA = officeTime - round(ride[k] + dwell). */
     private LocalDateTime etaFor(int k) {
+        return etaFor(ride, k, shift, dwellMinutes);
+    }
+
+    private boolean windowHolds(int k) {
+        return windowHolds(outward.get(k), ride, k, shift, dwellMinutes);
+    }
+
+    /** DROP stop k ETA = officeTime + round(ride[k]); PICKUP stop k ETA = officeTime - round(ride[k] + dwell). */
+    private static LocalDateTime etaFor(double[] ride, int k, ShiftContext shift, double dwellMinutes) {
         return shift.direction() == Direction.DROP
-                ? shift.officeTime().plusMinutes(Math.round(ride[k]))
-                : shift.officeTime().minusMinutes(Math.round(ride[k] + dwellMinutes));
+                ? shift.officeTime().plusMinutes(roundedOffsetMinutes(ride, k, shift, dwellMinutes))
+                : shift.officeTime().minusMinutes(roundedOffsetMinutes(ride, k, shift, dwellMinutes));
+    }
+
+    /**
+     * Stop k's minute offset from officeTime, rounded the same way an ETA is: DROP rounds
+     * the ride minutes alone, PICKUP rounds them together with the boarding dwell. Shared
+     * by {@link #etaFor} and the window check so a stop shown at, say, 06:00 is never
+     * judged against an unrounded 05:59.6.
+     */
+    private static long roundedOffsetMinutes(double[] ride, int k, ShiftContext shift, double dwellMinutes) {
+        return shift.direction() == Direction.DROP
+                ? Math.round(ride[k])
+                : Math.round(ride[k] + dwellMinutes);
+    }
+
+    /**
+     * Whether stop k's own time window, if it has one for this shift's direction, is
+     * honoured by its ETA. A stop without the relevant window always holds, and is
+     * checked with no date maths: the null check short-circuits before {@link #etaFor}
+     * is ever called.
+     */
+    private static boolean windowHolds(Stop stop, double[] ride, int k, ShiftContext shift, double dwellMinutes) {
+        if (shift.direction() == Direction.PICKUP) {
+            LocalTime earliest = stop.earliestPickup();
+            return earliest == null
+                    || !etaFor(ride, k, shift, dwellMinutes).isBefore(resolvePickupEarliest(earliest, shift.officeTime()));
+        }
+        LocalTime latest = stop.latestDrop();
+        return latest == null
+                || !etaFor(ride, k, shift, dwellMinutes).isAfter(resolveDropLatest(latest, shift.officeTime()));
+    }
+
+    /**
+     * Places a PICKUP earliest-time preference on the calendar: that time on the office
+     * time's date, or the day before if that would put it after the office time (a
+     * pickup happens before the office is reached, so the preference must too).
+     */
+    private static LocalDateTime resolvePickupEarliest(LocalTime earliest, LocalDateTime officeTime) {
+        LocalDateTime candidate = officeTime.toLocalDate().atTime(earliest);
+        return candidate.isAfter(officeTime) ? candidate.minusDays(1) : candidate;
+    }
+
+    /**
+     * Places a DROP latest-time preference on the calendar: that time on the office
+     * time's date, or the day after if that would put it before the office time (a drop
+     * happens after the cab leaves the office, so the deadline must too) -- e.g. a 22:10
+     * departure with "by 00:30" means 00:30 the next day.
+     */
+    private static LocalDateTime resolveDropLatest(LocalTime latest, LocalDateTime officeTime) {
+        LocalDateTime candidate = officeTime.toLocalDate().atTime(latest);
+        return candidate.isBefore(officeTime) ? candidate.plusDays(1) : candidate;
     }
 }

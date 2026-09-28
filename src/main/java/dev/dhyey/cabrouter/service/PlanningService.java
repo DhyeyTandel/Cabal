@@ -166,8 +166,9 @@ public class PlanningService {
     private ShiftPlan.Cab toCab(RoutePlan plan, CabRoute cab) {
         List<StopTiming> stops = cab.getStops().stream()
                 .map(rs -> new StopTiming(
-                        new Stop(rs.getEmployee().getId(), rs.location(), rs.getEmployee().isEscortSensitive()),
-                        rs.getEta(), rs.getRideMinutes()))
+                        new Stop(rs.getEmployee().getId(), rs.location(), rs.getEmployee().isEscortSensitive(),
+                                rs.getEmployee().getEarliestPickup(), rs.getEmployee().getLatestDrop()),
+                        rs.getEta(), rs.getRideMinutes(), rs.isWindowMissed()))
                 .toList();
         return new ShiftPlan.Cab(cab.getCabNumber(), plan.vehicleNamed(cab.getVehicleType()), stops,
                 cab.getDistanceKm(), cab.getMaxRideMinutes(), cab.isEscortRequired(), cab.getCost(),
@@ -209,7 +210,8 @@ public class PlanningService {
         int sequence = 1;
         for (StopTiming t : cab.stops()) {
             Employee e = employees.getReferenceById(t.stop().employeeId());
-            entity.getStops().add(new RouteStop(entity, e, sequence++, t.stop().location(), t.eta(), t.rideMinutes()));
+            entity.getStops().add(new RouteStop(entity, e, sequence++, t.stop().location(), t.eta(), t.rideMinutes(),
+                    t.windowMissed()));
         }
     }
 
@@ -245,7 +247,7 @@ public class PlanningService {
 
     private static Stop toStop(Employee e) {
         return new Stop(e.getId(), new GeoPoint(e.getLatitude(), e.getLongitude()),
-                e.isEscortSensitive());
+                e.isEscortSensitive(), e.getEarliestPickup(), e.getLatestDrop());
     }
 
     private static void requireSameOffice(Employee e, Office office) {

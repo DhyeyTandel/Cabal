@@ -44,7 +44,8 @@ no database:
 | Method | Path | What it does |
 |---|---|---|
 | `POST` | `/api/offices` | Create an office (the depot) |
-| `POST` | `/api/employees` | Register an employee with home coordinates and gender |
+| `POST` | `/api/employees` | Register an employee with home coordinates, gender and optional `earliestPickup` / `latestDrop` ("HH:mm") |
+| `PUT` | `/api/employees/{id}/time-window` | Set or clear an employee's time window |
 | `GET` | `/api/offices/{id}/employees` | List an office's employees |
 | `POST` | `/api/plans` | Plan a shift: `officeId`, `shiftTime`, `direction` (`PICKUP`/`DROP`), `employeeIds`, and optionally `fleet` (or the shorthand `cabCapacity`) and `maxRideMinutes` |
 | `GET` | `/api/plans` | The 50 newest plans, as summaries |
@@ -296,6 +297,24 @@ reshuffle is worth the disruption.
 In practice, stability matters more than a few kilometres once drivers and riders have
 been notified. So the cheap, predictable repair is the default, and the full
 re-optimisation is an explicit choice.
+
+**Time windows.** An employee can say "do not pick me up before 06:30"
+(`earliestPickup`, used on pickup plans) or "get me home by 23:30" (`latestDrop`, used
+on drop plans). Because pickups are timed backwards from the office arrival and drops
+forwards from departure, both come down to a per-rider cap on the ride, so they are
+enforced wherever the ride limit is: the sweep, insertion, the inter-route search, the
+escort reorder and dissolving. The check uses the same rounding as the published ETA,
+so a rider shown at 06:30 is never judged 06:29.6, and a drop window past midnight
+("by 00:30" for a 22:10 departure) resolves to the next day. Like the ride limit, a
+lone rider always gets a cab; if even that cannot meet their window, the stop is
+flagged `windowMissed` rather than dropped. Windows are read live from the employee, so
+a changed preference applies at the plan's next edit.
+
+On the demo, "Rohan not before 06:15" moved his pickup from 05:53 to 06:19 and
+"Vikram home by 23:15" was already met (23:07). "Lakshmi not before 06:00" cannot be
+met at all: alone, Electronic City to the office at morning traffic needs a 05:51
+pickup to arrive by 07:15, so she rides solo and is flagged. Windows cost money: that
+07:30 pickup went from 5 cabs and 7,163 to 7 cabs and 8,317.
 
 **Dissolving a cab** is the middle path for plans that local repairs have thinned out.
 A cab can be dissolved when every one of its riders fits into one of its six nearest

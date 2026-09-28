@@ -119,6 +119,9 @@ function renderSummary(plan) {
     ["Distance", `${formatNumber(plan.totalDistanceKm)} km`],
     ["Cost", formatNumber(plan.totalCost)],
   ];
+  if (plan.windowsMissed > 0) {
+    metrics.push(["Windows missed", String(plan.windowsMissed)]);
+  }
   for (const [label, value] of metrics) {
     const wrap = document.createElement("div");
     const dt = document.createElement("dt");
@@ -251,11 +254,27 @@ function setSelectedCab(cabNumber) {
 function renderCabList(plan) {
   cabListEl.textContent = "";
   for (const cab of plan.cabs) {
-    cabListEl.appendChild(buildCabCard(cab));
+    cabListEl.appendChild(buildCabCard(cab, plan.direction));
   }
 }
 
-function buildCabCard(cab) {
+/** "HH:mm" from a "HH:mm" or "HH:mm:ss" LocalTime string. */
+function formatHHmm(localTime) {
+  return localTime.slice(0, 5);
+}
+
+/** The stop's own window, relevant to this plan's direction, or null if it has none. */
+function windowLabel(stop, direction) {
+  if (direction === "PICKUP" && stop.earliestPickup) {
+    return `after ${formatHHmm(stop.earliestPickup)}`;
+  }
+  if (direction === "DROP" && stop.latestDrop) {
+    return `by ${formatHHmm(stop.latestDrop)}`;
+  }
+  return null;
+}
+
+function buildCabCard(cab, direction) {
   const card = document.createElement("article");
   card.className = "cab-card";
   card.dataset.cabNumber = String(cab.cabNumber);
@@ -299,11 +318,32 @@ function buildCabCard(cab) {
     const name = document.createElement("span");
     name.className = "cab-card__stop-name";
     name.textContent = stop.employeeName;
+
+    const timeWrap = document.createElement("span");
+    timeWrap.className = "cab-card__stop-time";
     const eta = document.createElement("span");
     eta.className = "cab-card__stop-eta";
     eta.textContent = formatTime(stop.eta);
+    timeWrap.appendChild(eta);
+
+    const windowText = windowLabel(stop, direction);
+    if (windowText) {
+      const windowEl = document.createElement("span");
+      windowEl.className = "cab-card__stop-window";
+      windowEl.textContent = windowText;
+      if (stop.windowMissed) {
+        windowEl.classList.add("cab-card__stop-window--missed");
+        windowEl.appendChild(document.createTextNode(" "));
+        const flag = document.createElement("span");
+        flag.className = "cab-card__stop-window-flag";
+        flag.textContent = "missed";
+        windowEl.appendChild(flag);
+      }
+      timeWrap.appendChild(windowEl);
+    }
+
     item.appendChild(name);
-    item.appendChild(eta);
+    item.appendChild(timeWrap);
     stops.appendChild(item);
   }
   card.appendChild(stops);
