@@ -2,9 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Cabal</title>
-<meta name="description" content="Cabal: a routing engine that groups employees into cabs, orders the stops and times every pickup. Live demo plans.">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cabal: cab routing, live</title>
+<meta name="description" content="Cabal is a routing engine I built. It groups employees into cabs, orders the stops and times every pickup. Watch a real shift or plan your own.">
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -16,67 +16,89 @@
 <link rel="stylesheet" href="/app.css">
 </head>
 <body>
+<div class="shell" id="shell" data-mode="demo" data-sheet="half" data-clock="off" data-state="loading">
 
-<div class="page">
+  <a class="brand-float" href="/" aria-label="Cabal, reload">Cabal<span class="wordmark__dot" aria-hidden="true"></span></a>
 
-  <header class="site-header">
-    <p class="eyebrow"><span class="eyebrow-dot"></span>Cabal / live demo</p>
-    <h1 class="display-hero">Cabs, <em>routed</em>.</h1>
-    <p class="lede">I built a routing engine that groups employees into cabs, orders the stops and
-      times every pickup. This is a live plan it made.</p>
-  </header>
-
-  <main>
-    <nav class="pill-row" id="mode-pills" aria-label="Mode">
-      <button type="button" class="plan-pill" id="mode-demo-pill" aria-pressed="true">Demo plans</button>
-      <button type="button" class="plan-pill" id="mode-sandbox-pill" aria-pressed="false">Try it</button>
-    </nav>
-
-    <div id="demo-mode">
-      <nav class="pill-row" id="plan-pills" aria-label="Plans"></nav>
+  <div class="map-wrap" id="map-wrap">
+    <div id="map" role="region" aria-label="Route map"></div>
+    <p class="map-hint" id="map-hint" hidden>Tap anywhere to drop a rider</p>
+    <div class="readout" id="readout" hidden>
+      <span class="readout__time" id="readout-time"></span>
+      <span class="readout__meta" id="readout-meta"></span>
     </div>
+  </div>
 
-    <div id="sandbox-mode" hidden>
-      <p class="sandbox-lede">Drop riders on the map or add 20 at random, then plan. Nothing is saved.</p>
-      <div class="sandbox-controls">
-        <nav class="pill-row" id="shift-pills" aria-label="Shift">
-          <button type="button" class="plan-pill" data-shift-time="07:30" data-direction="PICKUP" aria-pressed="true">07:30 pickup</button>
-          <button type="button" class="plan-pill" data-shift-time="22:00" data-direction="DROP" aria-pressed="false">22:00 drop</button>
-        </nav>
-        <nav class="pill-row" id="fleet-pills" aria-label="Fleet">
-          <button type="button" class="plan-pill" data-fleet="SEDANS" aria-pressed="true">4-seat cabs</button>
-          <button type="button" class="plan-pill" data-fleet="MIXED" aria-pressed="false">Sedans + 2 SUVs</button>
-        </nav>
-        <div class="sandbox-actions">
-          <button type="button" class="ghost-button" id="random-riders-btn">20 random riders</button>
+  <aside class="panel" id="panel" aria-label="Plans and cabs">
+    <button type="button" class="sheet-handle" id="sheet-handle" aria-label="Panel: half height. Tap to change." aria-controls="panel-scroll"><span class="sheet-handle__bar"></span></button>
+    <div class="panel-scroll" id="panel-scroll">
+
+      <header class="panel-head" id="panel-head">
+        <div class="brand-row">
+          <h1 class="wordmark">Cabal<span class="wordmark__dot" aria-hidden="true"></span></h1>
+          <a class="source-link" href="https://github.com/DhyeyTandel/Cabal">Source &#8599;&#xFE0E;</a>
+        </div>
+        <p class="lede">I built an engine that groups employees into cabs, orders every stop and times every pickup, within seat, ride time and night safety limits. Watch a real shift, or plan your own.</p>
+        <div class="mode-switch" id="mode-pills" role="group" aria-label="Mode">
+          <span class="mode-switch__thumb" aria-hidden="true"></span>
+          <button type="button" id="mode-demo-pill" aria-pressed="true">Demo plans</button>
+          <button type="button" id="mode-sandbox-pill" aria-pressed="false">Try it live</button>
+        </div>
+      </header>
+
+      <div class="picker" id="demo-mode">
+        <nav class="shift-tabs" id="plan-pills" aria-label="Shift"></nav>
+      </div>
+
+      <div class="picker trial" id="sandbox-mode" hidden>
+        <div class="trial__top">
+          <p class="trial__count"><span id="rider-counter">0</span><span class="trial__of"> / 40 riders</span></p>
+          <button type="button" class="primary-pill" id="plan-it-btn" disabled>Plan it <span aria-hidden="true">&#8594;</span></button>
+        </div>
+        <p class="trial__hint" id="trial-hint">Tap the map to drop a rider. Tap a pin to remove it.</p>
+        <div class="trial__tools">
+          <button type="button" class="ghost-button" id="random-riders-btn">Add 20 at random</button>
+          <button type="button" class="ghost-button" id="women-pill" aria-pressed="false">Next pins: women</button>
           <button type="button" class="ghost-button" id="clear-riders-btn">Clear</button>
-          <span class="rider-counter" id="rider-counter">0 / 40 riders</span>
-          <button type="button" class="primary-pill" id="plan-it-btn" disabled>Plan it</button>
+        </div>
+        <div class="seg" id="shift-pills" role="group" aria-label="Shift">
+          <button type="button" data-shift-time="07:30" data-direction="PICKUP" aria-pressed="true">07:30 pickup</button>
+          <button type="button" data-shift-time="22:00" data-direction="DROP" aria-pressed="false">22:00 drop</button>
+        </div>
+        <div class="seg" id="fleet-pills" role="group" aria-label="Fleet">
+          <button type="button" data-fleet="SEDANS" aria-pressed="true">4-seat cabs</button>
+          <button type="button" data-fleet="MIXED" aria-pressed="false">Sedans + 2 SUVs</button>
         </div>
       </div>
+
+      <section class="board" id="board" aria-label="Plan summary">
+        <p class="board__title" id="board-title"></p>
+        <dl class="board__cells" id="summary-bar"></dl>
+        <p class="board__stamp" id="sandbox-not-saved" hidden>Your plan, not saved</p>
+      </section>
+
+      <p class="notice" id="state-message" role="status" hidden></p>
+      <noscript><p class="notice">This demo needs JavaScript to fetch and draw the routes.</p></noscript>
+
+      <section class="detail" id="plan-detail" aria-label="Cabs on this shift" hidden>
+        <div class="ruler" id="ruler">
+          <button type="button" class="play-btn" id="play-btn" aria-label="Play the shift"></button>
+          <div class="ruler__track">
+            <div class="ruler__ticks" id="ruler-ticks" aria-hidden="true"></div>
+            <input class="ruler__range" id="scrub-range" type="range" min="0" max="60" step="1" value="0" aria-label="Shift clock">
+          </div>
+        </div>
+        <p class="lines__caption" id="lines-caption"></p>
+        <ol class="lines" id="cab-list"></ol>
+      </section>
+
+      <footer class="panel-foot">
+        <p>Built by Dhyey Tandel. Java and Spring Boot: sweep clustering, stop sequencing and route improvement run on every plan.</p>
+        <a href="https://github.com/DhyeyTandel/Cabal">Source on GitHub &#8599;&#xFE0E;</a>
+      </footer>
     </div>
-
-    <p class="state-message" id="state-message" hidden></p>
-    <p class="sandbox-not-saved" id="sandbox-not-saved" hidden>Your plan, not saved</p>
-
-    <section class="plan-detail" id="plan-detail" hidden>
-      <div class="detail-main">
-        <dl class="summary-bar" id="summary-bar" hidden></dl>
-        <div class="map-frame">
-          <div id="map"></div>
-        </div>
-      </div>
-      <aside class="cab-list" id="cab-list" aria-label="Cabs"></aside>
-    </section>
-  </main>
-
-  <footer class="site-footer">
-    <p class="footer-credit">Built by Dhyey Tandel</p>
-    <a class="footer-link" href="https://github.com/DhyeyTandel/Cabal">Source on GitHub &#8599;</a>
-  </footer>
-
+  </aside>
 </div>
-
 <script src="/app.js"></script>
 </body>
 </html>

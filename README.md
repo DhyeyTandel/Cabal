@@ -453,13 +453,19 @@ timed with the traffic at the hour it is driven.
 ## Deployment
 
 It runs at **https://cabal.dhyeytandel.in** on a small Linux server, reached through a
-Cloudflare Tunnel. The page at `/` has two tabs:
+Cloudflare Tunnel. The page at `/` is a dispatcher's line sheet: a full-height map with one panel beside it
+(a snapping bottom sheet on phones). Every cab is drawn as a transit line on a shared
+shift clock, with riders as stations at their ETAs and the office as the terminus, so
+grouping, stop order and timing read at a glance. A split-flap board summarises the
+plan, and selecting a cab opens its stop diagram and a ledger of the rules it obeyed
+(seats, ride limit, time windows, night guard). On load the shift plays itself: cabs
+move along their routes while the board counts riders on board; the ruler scrubs it
+by hand.
 
-- **Demo plans:** the seeded 07:30 pickup and 22:00 drop, drawn on a map with every
-  cab's route, vehicle, cost and each rider's ETA and window.
-- **Try it:** visitors drop up to 40 riders on the map (or add 20 at random), pick a
-  shift and a fleet, and the real engine plans it on the server in well under a
-  second. Nothing is saved.
+- **Demo plans:** the seeded 07:30 pickup and 22:00 drop.
+- **Try it live:** visitors drop up to 40 riders on the map (or add 20 at random, or
+  mark the next pins as women to see the night rule), pick a shift and a fleet, and
+  the real engine plans it on the server in well under a second. Nothing is saved.
 
 Anyone can read the API and use the sandbox; only the API key holder can change
 stored data.
@@ -550,7 +556,7 @@ service/   PlanningService (loads entities, calls ShiftPlan, saves changed cabs)
 api/       REST controllers, request/response records, problem-detail error mapping
 config/    RoutingProperties (all tunables in application.properties), read only here to
            build PlanningPolicy and the travel-model provider
-static/    the read-only demo page: index.html, app.css, app.js (Leaflet map)
+static/    the demo page: index.html, app.css, app.js (Leaflet map, no build step)
 db/migration/   schema, owned by Flyway; Hibernate only validates it
   V1__init.sql          initial schema
   V2__mixed_fleet.sql   adds fleets and migrates existing plans in place

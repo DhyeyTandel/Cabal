@@ -575,3 +575,62 @@ narrower viewports.
   restarted.
 
 **Scale/limits** — n/a; static asset changes only.
+
+## [2026-10-06] Rebuild the demo page as a "Line Sheet"
+
+**Problem** — After two rounds of layout fixes the owner still found the page "not that
+good" and asked for something creative that does not look like a generic AI design,
+on an Uber-style skeleton in his own colour theme. The page was a document with a map
+and a list of cards; it showed results but did not show the engine doing anything.
+
+**Options considered**
+- Keep polishing the card layout. Rejected: it was already correct, just forgettable.
+- A KPI dashboard (four metric tiles above a map). Rejected as the generic look the
+  owner ruled out.
+- Draw each cab as a transit line on one shared shift clock, with a scrubber that
+  replays the shift. Chosen: a routing engine's output literally is a set of lines
+  with stops in time order, so the picture is the data rather than decoration.
+
+**Decision** — Full-height app shell: the document never scrolls; a docked panel
+(380/440/480px) beside a full-bleed map, a snapping bottom sheet under 768px. Inside:
+a split-flap departure board for the summary, a sticky ruler with play/scrub, one
+transit strip per cab on the shared axis, an expanded metro-style stop diagram with a
+constraint ledger, cab discs that move on the map during playback, autoplay once on
+first load, and Try it with numbered pins and a "women" toggle so visitors can trigger
+the night rule. Brand tokens kept and extended (blurple for time windows, magenta for
+night safety, orange rationed to the selected cab). Static files only; CSP unchanged.
+
+Process: the owner asked for an Opus orchestrator with a Sonnet worker. An Opus design
+director wrote the spec; the orchestrator reviewed it and changed two things (kept
+the existing Google Fonts URL instead of a narrowed one with non-standard weights, and
+split the build into two passes so the riskiest parts, playback and sheet drag, were
+verified separately). A Sonnet worker built each pass; the orchestrator verified each
+in a browser.
+
+**Tradeoff accepted**
+- About 93 KB of uncompressed front-end code, up from 37 KB (gzip shrinks it a lot).
+- Autoplay moves things without being asked; it runs once, only on first load,
+  cancels on any interaction, and never under prefers-reduced-motion.
+- Routes are straight segments between stops, so moving cabs cut across blocks. Road
+  geometry would need the OSRM polyline from the backend.
+- The sandbox hardcodes the office name and the 90-minute ride cap.
+
+**What went wrong**
+- The design director (Opus) and the first pass B worker (Sonnet) both stopped on the
+  account's session rate limit. The director had already written the full spec; the
+  pass B worker had changed nothing (file sizes and timestamps matched pass A
+  exactly). Pass A was backed up before retrying.
+- Pass A met a 72 KB size budget by compacting CSS onto single lines and collapsing
+  blocks into brace-less one-liners. The orchestrator withdrew the budget and had pass B
+  restore readable formatting: the owner has to explain this code, and gzip makes the
+  raw size matter little.
+- In the browser, one run showed grey tiles and a map stuck at the wrong zoom, and the
+  clock overran its end. Measured instead of patched: the browser pane was in the
+  background (`document.hidden`), which pauses requestAnimationFrame and with it
+  Leaflet's tile fade and the playback clock. Every run with the pane visible, at
+  1280, 1024 and 375px, kept the map fitted and ended playback on time.
+- A synthetic pointer "tap" on the sheet handle did not cycle the sheet; a real click
+  did. Taps produce a click event, which is what the handler listens for.
+
+**Scale/limits** — Playback updates DOM text and classes only when the minute changes,
+so 7 to 10 cabs with 40 riders stay cheap; not profiled on a low-end phone.
