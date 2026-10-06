@@ -432,8 +432,7 @@ These are honest gaps, roughly in the order I would fix them:
 3. **Pricing is simple.** Real vendor contracts have minimum-km slabs, night
    surcharges and waiting charges. The model is trip charge plus a per-km rate, and a
    flat guard cost. Vehicle assignment is greedy, not an exact min-cost matching.
-4. **No time windows or depot deadhead.** Employees cannot say "not before 07:00".
-   Cabs are assumed to start at their first stop, with no drive from the vendor's yard.
+4. **No vendor-yard depot deadhead.** Cabs are assumed to start at their first stop, with no drive from the vendor's yard. Employee pickup and drop time windows are supported; see [Time windows](#re-planning).
 5. **Local repair drifts.** Many cancellations in a row leave half-empty cabs, still in
    their original vehicles. Dissolve suggestions recover much of this, but only one cab
    at a time and only into its six nearest neighbours; pairs of cabs are not merged
