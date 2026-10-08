@@ -94,7 +94,11 @@ Errors come back as RFC 9457 problem details:
 
 A plan response lists each cab's vehicle and its stops in driving order, with ETAs.
 Each cab also reports `travelSource` (`HAVERSINE`, `OSRM` or `HAVERSINE_FALLBACK`),
-the model that timed it:
+the model that timed it. With OSRM it also carries `legs`: one polyline6-encoded road
+path per route segment (stop to stop, then the last stop to the office, or the office to
+the first stop), which the map draws and the playback follows. `legs` is an empty list
+when unknown (haversine plans, an OSRM outage when the cab was written, or a cab stored
+before geometry existed; re-plan the plan to fill it in).
 
 ```text
 cab 2 SEDAN [2/4 seats, 32.17 km, longest ride 89.73 min, ESCORT]: office 22:10 -> Aditya 23:08 -> Lakshmi 23:40
@@ -259,21 +263,39 @@ cabs `HAVERSINE_FALLBACK`. An OSRM outage makes the plan less accurate but does 
 stop it being made. A pair OSRM cannot route (such as a point snapped to a disconnected
 road) is estimated by haversine rather than failing the plan.
 
-**Privacy.** The OSRM request contains employees' home coordinates. Do not send those
-to the public demo server in production: run your own. Logs never include the request
-URL, for the same reason. To self-host for Bengaluru:
+**Road geometry.** With OSRM on, each cab that is written (new or changed, never an
+untouched one) also gets its route's street geometry from OSRM's route service, stored
+in `cab_routes.route_legs` as one polyline6 string per line. It is purely for display:
+if that request fails the cab is stored without it and the map falls back to straight
+segments, and haversine mode never produces any.
 
-```bash
-wget https://download.geofabrik.de/asia/india/southern-zone-latest.osm.pbf   # ~560 MB
-docker run -t -v "$PWD:/data" ghcr.io/project-osrm/osrm-backend osrm-extract -p /opt/car.lua /data/southern-zone-latest.osm.pbf
-docker run -t -v "$PWD:/data" ghcr.io/project-osrm/osrm-backend osrm-partition /data/southern-zone-latest.osrm
-docker run -t -v "$PWD:/data" ghcr.io/project-osrm/osrm-backend osrm-customize /data/southern-zone-latest.osrm
-docker run -t -p 5000:5000 -v "$PWD:/data" ghcr.io/project-osrm/osrm-backend osrm-routed --algorithm mld --max-table-size 1000 /data/southern-zone-latest.osrm
-```
+**Privacy.** The OSRM request contains employees' home coordinates, so the public demo
+server is not an option in production. Logs never include the request URL, for the
+same reason, and OSRM is only ever called from the server, never from the browser.
 
-Then set `OSRM_URL=http://localhost:5000` and raise `routing.osrm.max-table-size` to
-match. (These are the OSRM project's standard steps. The service itself was tested
-against the public demo server and a stub, not a self-hosted instance.)
+**How this deployment runs it.** `deploy/deploy.sh --osrm` (script:
+`deploy/setup-osrm.sh`, run as root on the server) self-hosts OSRM next to the app:
+
+- Map data is Geofabrik's South India extract, cropped to a Bengaluru box
+  (77.30,12.75 to 77.95,13.35) with `osmium`; the large download is deleted afterwards.
+  The crop keeps the graph small enough for a shared server.
+- The image is pinned (`ghcr.io/project-osrm/osrm-backend:v26.10.0-debian`) and the
+  graph is built with the MLD pipeline (`osrm-extract`, `osrm-partition`,
+  `osrm-customize`).
+- One container, `cabal-osrm`, publishes `127.0.0.1:5000` only, so nothing outside the
+  machine can reach it. It is capped at 768 MB, restarts with Docker, and
+  `--max-table-size 100` matches `routing.osrm.max-table-size`.
+- The script checks a real test route, sets `TRAVEL_MODEL=osrm` and `OSRM_URL` in
+  `/etc/cabal/cabal.env`, restarts the service, and re-plans every stored plan so the
+  stored routes use roads.
+- It never installs Docker and never touches another container or service. Re-running
+  it refreshes the map data; the old graph keeps serving until the new one is built.
+
+If OSRM goes down, plans fall back to haversine (`HAVERSINE_FALLBACK`) and the map
+draws straight segments until it is back. For a different city, change the box in the
+script. Elsewhere, the OSRM project's own steps work: `osrm-extract -p /opt/car.lua`,
+`osrm-partition`, `osrm-customize`, then `osrm-routed --algorithm mld`, with
+`OSRM_URL` pointing at it and `routing.osrm.max-table-size` set to match.
 
 ### Re-planning
 
@@ -424,8 +446,10 @@ These are honest gaps, roughly in the order I would fix them:
    every road gets the same factor at a given hour, and the default factors are
    assumptions. An outer ring road and a residential lane do not congest alike.
    Per-road speeds (OSRM supports custom segment speeds) fitted to real GPS trip logs,
-   or a traffic-aware matrix API, would fix both. Without OSRM, straight-line
-   distances can also be off by up to 4× for individual pairs (measured above).
+   or a traffic-aware matrix API, would fix both. There is no live traffic: OSRM times
+   are free-flow and the time-of-day curve is the only congestion model. Without OSRM,
+   straight-line distances can also be off by up to 4× for individual pairs (measured
+   above).
 2. **No global optimality guarantee.** Sweep plus local search finds good plans, not
    optimal ones. For large shifts, a metaheuristic (simulated annealing, or ALNS as used
    in production VRP solvers) or a solver like OR-Tools would do better.
@@ -474,18 +498,21 @@ stored data.
 export DEPLOY_HOST=user@your-server   # e.g. in your shell profile; kept out of this repo
 deploy/deploy.sh --setup --seed      # first time: Java, PostgreSQL, user, secrets, service, demo data
 deploy/deploy.sh                     # every release after that
+deploy/deploy.sh --osrm              # once: self-host OSRM; again to refresh the map data
 ```
 
 `deploy.sh` builds and tests on the Mac, copies the jar to the server over SSH,
 restarts the service, and rolls back to the previous jar if the new one
 does not answer `/healthz` within 90 seconds. It asks for the server's sudo password
-once. Everything it installs lives in `deploy/`:
+once. `--osrm` additionally runs `setup-osrm.sh` after the install; flags combine
+(`--setup --seed --osrm`). Everything it installs lives in `deploy/`:
 
 | File | Runs on | What it does |
 |---|---|---|
 | `deploy.sh` | Mac | Build, test, upload, trigger install |
 | `setup-server.sh` | Server, once | Java, PostgreSQL, `cabal` user, database, secrets in `/etc/cabal/cabal.env`, systemd unit. Safe to rerun; keeps existing secrets |
 | `install-release.sh` | Server | Swap the jar, restart, health-check, roll back on failure, optional demo seed |
+| `setup-osrm.sh` | Server | Self-hosted OSRM: Bengaluru map crop, pinned Docker image on `127.0.0.1:5000`, switch Cabal to it, re-plan stored plans. Safe to rerun; refreshes the map data |
 | `cabal.service` | Server | The systemd unit |
 | `cloudflare-tunnel.md` | Reference | How to add the dashboard-managed tunnel route |
 
@@ -531,8 +558,9 @@ the machine. The database pool is 5 connections and Tomcat 20 threads.
 **Other services on the machine.** The server runs other things too. None of them are
 routed through the tunnel, and setup never touches them.
 
-OSRM is off in production: the straight-line model needs no extra memory. It can be
-switched on later with `TRAVEL_MODEL=osrm` and a self-hosted OSRM (see
+OSRM runs there as the one container this project adds (`cabal-osrm`, localhost only,
+768 MB cap), started by `deploy.sh --osrm`. Without it the app still works: set
+`TRAVEL_MODEL=haversine` and it needs no extra memory (see
 [Travel times](#travel-times-haversine-or-osrm)).
 
 ## Code layout

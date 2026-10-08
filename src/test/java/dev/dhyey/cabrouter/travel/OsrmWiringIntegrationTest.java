@@ -1,6 +1,7 @@
 package dev.dhyey.cabrouter.travel;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -67,13 +68,48 @@ class OsrmWiringIntegrationTest {
         }
         int before = OSRM.requests.get();
 
-        mvc.perform(post("/api/plans").contentType(MediaType.APPLICATION_JSON)
+        String created = mvc.perform(post("/api/plans").contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"officeId": %d, "shiftTime": "2026-10-01T09:00:00", "direction": "PICKUP",
                                  "employeeIds": %s}""".formatted(officeId, ids)))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.cabs[0].travelSource").value("OSRM"));
+                .andExpect(jsonPath("$.cabs[0].travelSource").value("OSRM"))
+                .andReturn().getResponse().getContentAsString();
 
         assertThat(OSRM.requests.get() - before).isEqualTo(1);
+        assertEveryCabHasOneLegPerSegment(created);
+
+        // Stored with the cab, so a later read returns the same geometry without asking OSRM again.
+        int routeRequests = OSRM.routeRequests.get();
+        long planId = ((Number) JsonPath.read(created, "$.id")).longValue();
+        String reread = mvc.perform(get("/api/plans/{id}", planId)).andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat(JsonPath.<Object>read(reread, "$.cabs[*].legs")).isEqualTo(JsonPath.<Object>read(created, "$.cabs[*].legs"));
+        assertThat(OSRM.routeRequests.get()).isEqualTo(routeRequests);
+    }
+
+    @Test
+    void sandboxPlansCarryRoadGeometryToo() throws Exception {
+        MockMvc mvc = MockMvcBuilders.webAppContextSetup(context).build();
+
+        String body = mvc.perform(post("/api/sandbox/plan").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"direction": "DROP", "shiftTime": "18:00", "fleet": "SEDANS",
+                                 "riders": [{"latitude": 13.03, "longitude": 77.6, "woman": false},
+                                            {"latitude": 13.02, "longitude": 77.61, "woman": false}]}"""))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+
+        assertEveryCabHasOneLegPerSegment(body);
+    }
+
+    /** A cab with n stops has n route segments (stop to stop, plus one to or from the office). */
+    private static void assertEveryCabHasOneLegPerSegment(String planJson) {
+        List<Object> cabs = JsonPath.read(planJson, "$.cabs");
+        assertThat(cabs).isNotEmpty();
+        for (int i = 0; i < cabs.size(); i++) {
+            List<String> legs = JsonPath.read(planJson, "$.cabs[" + i + "].legs");
+            List<Object> stops = JsonPath.read(planJson, "$.cabs[" + i + "].stops");
+            assertThat(legs).hasSameSizeAs(stops).doesNotContain("");
+        }
     }
 }

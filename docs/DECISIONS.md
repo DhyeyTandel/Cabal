@@ -634,3 +634,51 @@ in a browser.
 
 **Scale/limits** — Playback updates DOM text and classes only when the minute changes,
 so 7 to 10 cabs with 40 riders stay cheap; not profiled on a low-end phone.
+
+## 2026-10-08: Self-host OSRM for road distances and road-shaped routes
+
+**Context**
+Travel times on the live site came from haversine with a 1.4 circuity factor, and every
+route was drawn as straight segments, so cabs cut across blocks during playback. The
+owner asked whether the Google Maps API could fix this.
+
+**Options considered**
+1. Self-hosted OSRM on the existing server: free, real road distances and times, road
+   geometry for the map; no live traffic (the hourly TrafficProfile stays the stand-in).
+2. Google Routes API: real and traffic-aware, but billed per matrix element. A 40-rider
+   sandbox plan is about 1,681 elements, roughly $8 to $17 per plan once past the free
+   monthly tier, on a public page anyone can press. Its terms around showing results on
+   a non-Google map were not fully confirmed [unverified].
+3. Keep haversine and only draw prettier lines: no real improvement to the plans.
+
+**Decision**
+Option 1, chosen by the owner. OSRM v26.10.0 (`-debian` image tag) with MLD on a
+Bengaluru crop of Geofabrik's South India extract, one container on 127.0.0.1:5000
+capped at 768 MB. The backend fetches one route per cab (`steps=true`, polyline6),
+stores one polyline per stop in a new nullable `cab_routes.route_legs` column (V6), and
+the API returns `legs` per cab; the front end draws and animates along them and falls
+back to straight lines when legs are missing or do not match the stop count.
+`deploy.sh --osrm` runs `setup-osrm.sh`, which builds the graph in a staging directory,
+swaps it in, points Cabal at it and re-plans every stored plan.
+
+**Tradeoff accepted**
+- No live traffic; peak-hour realism still comes from the hourly profile.
+- One extra OSRM route call per cab per plan, and stored geometry grows each row.
+- Plans made before the switch show straight lines until re-planned.
+- A failed OSRM call degrades silently to haversine times and straight lines (logged
+  without coordinates).
+
+**What went wrong**
+- The first data source tried, a BBBike Bangalore extract, returned 404; switched to
+  cropping Geofabrik's southern zone with osmium on the server.
+- The plain `v26.10.0` image tag does not exist on ghcr; only `v26.10.0-debian` does.
+- A read-only SSH check of the server hung on a Tailscale approval prompt and was
+  killed; the setup script checks for Docker itself instead.
+- The owner ran `deploy.sh --osrm` twice before the flag existed and got "unknown
+  option"; nothing was changed on the server.
+
+**Scale/limits**
+Verified locally against the public OSRM demo server (test only): real responses
+carry `legs[].steps[].geometry`, and a re-planned demo plan drew road-following routes
+with matching playback. Not yet verified on the server: preprocessing time, and whether
+768 MB is enough for the container [unverified].

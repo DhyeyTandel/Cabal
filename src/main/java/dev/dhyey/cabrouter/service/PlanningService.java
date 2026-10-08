@@ -22,6 +22,7 @@ import dev.dhyey.cabrouter.routing.Stop;
 import dev.dhyey.cabrouter.routing.StopTiming;
 import dev.dhyey.cabrouter.routing.TravelModelProvider;
 import dev.dhyey.cabrouter.routing.VehicleType;
+import dev.dhyey.cabrouter.travel.RouteGeometryProvider;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
@@ -46,14 +47,17 @@ public class PlanningService {
     private final RoutePlanRepository plans;
     private final TravelModelProvider travelProvider;
     private final PlanningPolicy policy;
+    private final RouteGeometryProvider geometry;
 
     public PlanningService(OfficeRepository offices, EmployeeRepository employees, RoutePlanRepository plans,
-                           TravelModelProvider travelProvider, PlanningPolicy policy) {
+                           TravelModelProvider travelProvider, PlanningPolicy policy,
+                           RouteGeometryProvider geometry) {
         this.offices = offices;
         this.employees = employees;
         this.plans = plans;
         this.travelProvider = travelProvider;
         this.policy = policy;
+        this.geometry = geometry;
     }
 
     public PlanResponse create(CreatePlanRequest req) {
@@ -196,16 +200,20 @@ public class PlanningService {
             if (entity == null) {
                 entity = plan.addCab(cab.cabNumber());
             }
-            writeCab(entity, cab);
+            writeCab(entity, cab, plan);
         }
         plan.getCabs().removeIf(c -> !keep.contains(c.getCabNumber()));
         // A cab created in a numbering gap is appended last; keep this response in cab order too.
         plan.getCabs().sort(Comparator.comparingInt(CabRoute::getCabNumber));
     }
 
-    private void writeCab(CabRoute entity, ShiftPlan.Cab cab) {
+    private void writeCab(CabRoute entity, ShiftPlan.Cab cab, RoutePlan plan) {
         entity.update(cab.vehicle(), cab.distanceKm(), cab.maxRideMinutes(), cab.escortRequired(), cab.cost(),
                 cab.officeTime(), cab.timedBy());
+        // Only cabs being written get geometry; untouched cabs keep what they have.
+        entity.setRouteLegs(geometry.legs(
+                RouteGeometryProvider.drivingOrder(plan.getDirection(), plan.getOffice().location(), cab.stops()))
+                .orElse(null));
         entity.getStops().clear();
         int sequence = 1;
         for (StopTiming t : cab.stops()) {

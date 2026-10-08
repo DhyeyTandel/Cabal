@@ -5,8 +5,11 @@ import dev.dhyey.cabrouter.routing.PlanningPolicy;
 import dev.dhyey.cabrouter.routing.TrafficProfile;
 import dev.dhyey.cabrouter.routing.TravelModelProvider;
 import dev.dhyey.cabrouter.travel.HaversineProvider;
+import dev.dhyey.cabrouter.travel.NoGeometryProvider;
 import dev.dhyey.cabrouter.travel.OsrmClient;
+import dev.dhyey.cabrouter.travel.OsrmGeometryProvider;
 import dev.dhyey.cabrouter.travel.OsrmProvider;
+import dev.dhyey.cabrouter.travel.RouteGeometryProvider;
 import java.time.Duration;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -26,6 +29,17 @@ public class RoutingConfig {
         RoutingProperties.Osrm osrm = props.osrm();
         OsrmClient client = new OsrmClient(osrm.baseUrl(), osrm.maxTableSize(), Duration.ofSeconds(osrm.timeoutSeconds()));
         return new OsrmProvider(client, haversine);
+    }
+
+    /** Road geometry for the map: from OSRM when it times the plans, none for haversine. */
+    @Bean
+    RouteGeometryProvider routeGeometryProvider(RoutingProperties props) {
+        if (props.travelModel() != RoutingProperties.TravelModelKind.OSRM) {
+            return new NoGeometryProvider();
+        }
+        RoutingProperties.Osrm osrm = props.osrm();
+        return new OsrmGeometryProvider(
+                new OsrmClient(osrm.baseUrl(), osrm.maxTableSize(), Duration.ofSeconds(osrm.timeoutSeconds())));
     }
 
     /** The whole routing policy, assembled once at startup from {@code routing.*} properties. */

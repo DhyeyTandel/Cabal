@@ -34,6 +34,8 @@ public record PlanResponse(
     /**
      * @param officeTime   arrival at the office for PICKUP, departure from it for DROP
      * @param travelSource which travel model timed this cab
+     * @param legs         road geometry, one polyline6 string per segment of the route in driving
+     *                     order (stop to stop, last stop to office or office to first stop); empty when unknown
      */
     public record Cab(
             int cabNumber,
@@ -46,6 +48,7 @@ public record PlanResponse(
             double cost,
             LocalDateTime officeTime,
             TravelSource travelSource,
+            List<String> legs,
             List<StopView> stops) {
     }
 
@@ -95,7 +98,7 @@ public record PlanResponse(
     private static Cab cab(CabRoute c) {
         List<StopView> stops = c.getStops().stream().map(PlanResponse::stop).toList();
         return new Cab(c.getCabNumber(), c.getVehicleType(), c.getSeats(), stops.size(), round(c.getDistanceKm()), round(c.getMaxRideMinutes()),
-                c.isEscortRequired(), round(c.getCost()), c.getOfficeTime(), c.getTravelSource(), stops);
+                c.isEscortRequired(), round(c.getCost()), c.getOfficeTime(), c.getTravelSource(), c.routeLegs(), stops);
     }
 
     private static StopView stop(RouteStop s) {

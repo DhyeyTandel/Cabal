@@ -69,6 +69,7 @@ class PlanApiIntegrationTest {
                 .andExpect(jsonPath("$.revision").value(1))
                 .andExpect(jsonPath("$.cabs[0].officeTime").value("2026-10-01T08:45:00"))
                 .andExpect(jsonPath("$.cabs[0].travelSource").value("HAVERSINE"))
+                .andExpect(jsonPath("$.cabs[0].legs").isEmpty()) // no roads to draw without OSRM
                 .andReturn();
         long planId = id(created);
 

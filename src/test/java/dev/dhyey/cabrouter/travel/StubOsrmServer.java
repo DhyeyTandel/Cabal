@@ -22,6 +22,9 @@ final class StubOsrmServer implements AutoCloseable {
     final AtomicInteger requests = new AtomicInteger();
     /** Pairs (by latitude) the stub pretends it cannot route. */
     final List<double[]> unroutable = new ArrayList<>();
+    /** Route requests seen, and whether to answer them with a server error. */
+    final AtomicInteger routeRequests = new AtomicInteger();
+    volatile boolean failRoutes;
 
     StubOsrmServer(int maxTableSize) throws IOException {
         this.maxTableSize = maxTableSize;
@@ -36,7 +39,75 @@ final class StubOsrmServer implements AutoCloseable {
                 out.write(bytes);
             }
         });
+        server.createContext("/route/v1/driving/", exchange -> {
+            routeRequests.incrementAndGet();
+            if (failRoutes) {
+                exchange.sendResponseHeaders(500, -1);
+                exchange.close();
+                return;
+            }
+            String body = routeBody(exchange.getRequestURI().getPath());
+            byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(bytes);
+            }
+        });
         server.start();
+    }
+
+    /**
+     * The geometry the stub gives a leg from a to b: three steps (a to m, m to n, and a one-point
+     * arrive step), each starting where the previous ended, so the client must drop the repeats.
+     */
+    static List<List<GeoPoint>> legSteps(GeoPoint a, GeoPoint b) {
+        GeoPoint m = at(a, b, 0.5, 0);
+        return List.of(
+                List.of(a, at(a, b, 0.25, 0.0005), m),
+                List.of(m, at(a, b, 0.75, -0.0005), b),
+                List.of(b, b));
+    }
+
+    /** What the client should return for a leg: the steps joined without the repeated points. */
+    static List<GeoPoint> legPoints(GeoPoint a, GeoPoint b) {
+        List<GeoPoint> out = new ArrayList<>();
+        for (List<GeoPoint> step : legSteps(a, b)) {
+            for (GeoPoint p : step) {
+                if (out.isEmpty() || !out.get(out.size() - 1).equals(p)) {
+                    out.add(p);
+                }
+            }
+        }
+        return out;
+    }
+
+    private static GeoPoint at(GeoPoint a, GeoPoint b, double f, double sideways) {
+        return new GeoPoint(round6(a.lat() + (b.lat() - a.lat()) * f + sideways),
+                round6(a.lng() + (b.lng() - a.lng()) * f + sideways));
+    }
+
+    private static double round6(double v) {
+        return Math.round(v * 1e6) / 1e6;
+    }
+
+    private static String routeBody(String path) {
+        String[] coords = path.substring("/route/v1/driving/".length()).split(";");
+        List<GeoPoint> points = new ArrayList<>();
+        for (String c : coords) {
+            String[] ll = c.split(",");
+            points.add(new GeoPoint(Double.parseDouble(ll[1]), Double.parseDouble(ll[0])));
+        }
+        StringBuilder legs = new StringBuilder();
+        for (int i = 0; i + 1 < points.size(); i++) {
+            StringBuilder steps = new StringBuilder();
+            for (List<GeoPoint> step : legSteps(points.get(i), points.get(i + 1))) {
+                String geometry = Polyline.encode(step, 6).replace("\\", "\\\\").replace("\"", "\\\"");
+                steps.append(steps.length() == 0 ? "" : ",").append("{\"geometry\":\"").append(geometry).append("\"}");
+            }
+            legs.append(i == 0 ? "" : ",").append("{\"steps\":[").append(steps).append("]}");
+        }
+        return "{\"code\":\"Ok\",\"routes\":[{\"legs\":[" + legs + "]}],\"waypoints\":[]}";
     }
 
     String baseUrl() {

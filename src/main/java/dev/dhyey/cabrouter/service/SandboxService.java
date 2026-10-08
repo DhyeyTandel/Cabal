@@ -13,10 +13,13 @@ import dev.dhyey.cabrouter.routing.ShiftPlan;
 import dev.dhyey.cabrouter.routing.Stop;
 import dev.dhyey.cabrouter.routing.TravelModelProvider;
 import dev.dhyey.cabrouter.routing.VehicleType;
+import dev.dhyey.cabrouter.travel.RouteGeometryProvider;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -36,14 +39,17 @@ public class SandboxService {
 
     private final PlanningPolicy policy;
     private final TravelModelProvider travelProvider;
+    private final RouteGeometryProvider geometry;
     private final int maxRiders;
     private final double maxRadiusKm;
 
     public SandboxService(PlanningPolicy policy, TravelModelProvider travelProvider,
+                          RouteGeometryProvider geometry,
                           @Value("${routing.sandbox.max-riders:40}") int maxRiders,
                           @Value("${routing.sandbox.max-radius-km:25}") double maxRadiusKm) {
         this.policy = policy;
         this.travelProvider = travelProvider;
+        this.geometry = geometry;
         this.maxRiders = maxRiders;
         this.maxRadiusKm = maxRadiusKm;
     }
@@ -74,7 +80,12 @@ public class SandboxService {
         }
 
         ShiftPlan plan = ShiftPlan.create(OFFICE, params, travelProvider, stops);
-        return SandboxPlanResponse.from(req.direction(), shiftTime, OFFICE, plan);
+        Map<Integer, List<String>> legs = new HashMap<>();
+        for (ShiftPlan.Cab cab : plan.cabs()) {
+            geometry.legs(RouteGeometryProvider.drivingOrder(req.direction(), OFFICE, cab.stops()))
+                    .ifPresent(l -> legs.put(cab.cabNumber(), l));
+        }
+        return SandboxPlanResponse.from(req.direction(), shiftTime, OFFICE, plan, legs);
     }
 
     /** SEDANS: unlimited 4-seat SEDANs. MIXED: the same SEDANs plus up to 2 6-seat SUVs. */

@@ -10,6 +10,7 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /** The result of one sandbox plan, built straight from {@link ShiftPlan#cabs()}: no entities, nothing stored. */
 public record SandboxPlanResponse(
@@ -34,6 +35,7 @@ public record SandboxPlanResponse(
             boolean escortRequired,
             double cost,
             LocalDateTime officeTime,
+            List<String> legs,
             List<StopView> stops) {
     }
 
@@ -57,8 +59,13 @@ public record SandboxPlanResponse(
             boolean woman) {
     }
 
-    public static SandboxPlanResponse from(Direction direction, LocalDateTime shiftTime, GeoPoint office, ShiftPlan plan) {
-        List<Cab> cabs = plan.cabs().stream().map(SandboxPlanResponse::cab).toList();
+    /**
+     * @param legs road geometry per cab number, polyline6-encoded per route segment; a cab missing from the map has none
+     */
+    public static SandboxPlanResponse from(Direction direction, LocalDateTime shiftTime, GeoPoint office, ShiftPlan plan,
+                                           Map<Integer, List<String>> legs) {
+        List<Cab> cabs = plan.cabs().stream()
+                .map(c -> cab(c, legs.getOrDefault(c.cabNumber(), List.of()))).toList();
         int riderCount = cabs.stream().mapToInt(Cab::seatsUsed).sum();
         double totalDistanceKm = round(plan.cabs().stream().mapToDouble(ShiftPlan.Cab::distanceKm).sum());
         double totalCost = round(plan.cabs().stream().mapToDouble(ShiftPlan.Cab::cost).sum());
@@ -67,14 +74,14 @@ public record SandboxPlanResponse(
                 cabs.size(), riderCount, totalDistanceKm, totalCost, windowsMissed, cabs);
     }
 
-    private static Cab cab(ShiftPlan.Cab c) {
+    private static Cab cab(ShiftPlan.Cab c, List<String> legs) {
         List<StopView> stops = new ArrayList<>(c.stops().size());
         int sequence = 1;
         for (StopTiming t : c.stops()) {
             stops.add(stop(sequence++, t));
         }
         return new Cab(c.cabNumber(), c.vehicle().name(), c.vehicle().seats(), stops.size(), round(c.distanceKm()),
-                round(c.maxRideMinutes()), c.escortRequired(), round(c.cost()), c.officeTime(), stops);
+                round(c.maxRideMinutes()), c.escortRequired(), round(c.cost()), c.officeTime(), legs, stops);
     }
 
     private static StopView stop(int sequence, StopTiming t) {

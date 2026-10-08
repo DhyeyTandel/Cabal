@@ -249,7 +249,7 @@ function buildTimeline(plan, office) {
     for (let i = 1; i < events.length; i++) {
       events[i].t = Math.max(events[i].t, events[i - 1].t);
     }
-    const tlCab = { events, start: events[0].t, end: events[events.length - 1].t };
+    const tlCab = { events, start: events[0].t, end: events[events.length - 1].t, legs: cab.roadLegs ? measureLegs(cab.roadLegs) : null };
     rawStart = Math.min(rawStart, tlCab.start);
     rawEnd = Math.max(rawEnd, tlCab.end);
     cabs.set(cab.cabNumber, tlCab);
@@ -265,25 +265,71 @@ function buildTimeline(plan, office) {
   return { start, end, span: end - start, cabs };
 }
 
+/** Cumulative distance along each leg, computed once; flat-earth units are fine at city scale. */
+function measureLegs(roadLegs) {
+  return roadLegs.map((pts) => {
+    const k = Math.cos((pts[0][0] * Math.PI) / 180);
+    const cum = [0];
+    for (let i = 1; i < pts.length; i++) {
+      cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], (pts[i][1] - pts[i - 1][1]) * k));
+    }
+    return { pts, cum };
+  });
+}
+
+/** The point a fraction f (0..1) of the way along a measured leg, by distance. */
+function legPoint(leg, f) {
+  const { pts, cum } = leg;
+  const total = cum[cum.length - 1];
+  if (f <= 0) {
+    return { lat: pts[0][0], lng: pts[0][1] };
+  }
+  if (f >= 1 || total === 0) {
+    const end = pts[pts.length - 1];
+    return { lat: end[0], lng: end[1] };
+  }
+  const target = f * total;
+  let lo = 1;
+  let hi = cum.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (cum[mid] < target) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  const span = cum[lo] - cum[lo - 1];
+  const g = span > 0 ? (target - cum[lo - 1]) / span : 0;
+  return { lat: pts[lo - 1][0] + (pts[lo][0] - pts[lo - 1][0]) * g, lng: pts[lo - 1][1] + (pts[lo][1] - pts[lo - 1][1]) * g };
+}
+
 function pct(tl, t) {
   return (t - tl.start) / tl.span;
 }
 
-/** Cab position at minute t: events interpolated linearly, clamped at both ends. */
+/**
+ * Cab position at minute t, clamped at both ends. Between events it follows the road leg by
+ * distance when the cab has legs, and interpolates the straight line between events otherwise.
+ */
 function positionAt(tlCab, t) {
   const ev = tlCab.events;
+  const legs = tlCab.legs;
   if (t <= ev[0].t) {
-    return { lat: ev[0].lat, lng: ev[0].lng };
+    return legs ? legPoint(legs[0], 0) : { lat: ev[0].lat, lng: ev[0].lng };
   }
   const last = ev[ev.length - 1];
   if (t >= last.t) {
-    return { lat: last.lat, lng: last.lng };
+    return legs ? legPoint(legs[legs.length - 1], 1) : { lat: last.lat, lng: last.lng };
   }
   let i = 0;
   while (i < ev.length - 2 && ev[i + 1].t <= t) {
     i++;
   }
   const f = (t - ev[i].t) / Math.max(1e-6, ev[i + 1].t - ev[i].t);
+  if (legs) {
+    return legPoint(legs[i], f);
+  }
   return { lat: ev[i].lat + (ev[i + 1].lat - ev[i].lat) * f, lng: ev[i].lng + (ev[i + 1].lng - ev[i].lng) * f };
 }
 
@@ -777,11 +823,44 @@ function normalizePlan(raw, kind) {
     ...raw,
     riderCount: demo ? raw.employeeCount : raw.riderCount,
     rideCapMinutes: demo ? raw.maxRideMinutes : SANDBOX_RIDE_CAP_MINUTES,
-    cabs: raw.cabs.map((c) => ({
-      ...c,
-      stops: [...c.stops].sort((a, b) => a.sequence - b.sequence).map((s) => normalizeStop(s, demo)),
-    })),
+    cabs: raw.cabs.map(normalizeCab(demo)),
   };
+}
+
+/** Adds roadLegs: one [[lat, lng], ...] per route segment, or null when the API gave none that fit. */
+function normalizeCab(demo) {
+  return (c) => {
+    const stops = [...c.stops].sort((a, b) => a.sequence - b.sequence).map((s) => normalizeStop(s, demo));
+    const roadLegs = Array.isArray(c.legs) && stops.length > 0 && c.legs.length === stops.length ? c.legs.map(decodePolyline6) : null;
+    // One short or empty leg would leave a gap in the line, so any of those means straight segments.
+    const usable = roadLegs && roadLegs.every((leg) => leg.length >= 2);
+    return { ...c, stops, roadLegs: usable ? roadLegs : null };
+  };
+}
+
+/** Google polyline algorithm at precision 6, as OSRM emits it. Returns [[lat, lng], ...]. */
+function decodePolyline6(str) {
+  const out = [];
+  let i = 0;
+  let lat = 0;
+  let lng = 0;
+  const next = () => {
+    let b;
+    let shift = 0;
+    let r = 0;
+    do {
+      b = str.charCodeAt(i++) - 63;
+      r |= (b & 31) << shift;
+      shift += 5;
+    } while (b >= 32 && i < str.length);
+    return r & 1 ? ~(r >> 1) : r >> 1;
+  };
+  while (i < str.length) {
+    lat += next();
+    lng += next();
+    out.push([lat / 1e6, lng / 1e6]);
+  }
+  return out;
 }
 
 function normalizeStop(s, demo) {
@@ -1523,6 +1602,10 @@ function flyToCab(cabNumber) {
 /* Map */
 
 function routePoints(plan, office, cab) {
+  if (cab.roadLegs) {
+    // Each leg starts where the previous one ended, so its first point is dropped.
+    return cab.roadLegs.flatMap((leg, i) => (i === 0 ? leg : leg.slice(1)));
+  }
   const stopPoints = cab.stops.map((s) => [s.latitude, s.longitude]);
   const officePoint = [office.latitude, office.longitude];
   return plan.direction === "PICKUP" ? [...stopPoints, officePoint] : [officePoint, ...stopPoints];

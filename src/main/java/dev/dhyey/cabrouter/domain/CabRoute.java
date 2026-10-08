@@ -3,6 +3,7 @@ package dev.dhyey.cabrouter.domain;
 import dev.dhyey.cabrouter.routing.TravelSource;
 import dev.dhyey.cabrouter.routing.VehicleType;
 import jakarta.persistence.CascadeType;
+import jakarta.persistence.Column;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Entity;
@@ -47,6 +48,14 @@ public class CabRoute {
     /** Office arrival for pickups, office departure for drops. */
     private LocalDateTime officeTime;
 
+    /**
+     * Road geometry, one polyline6-encoded leg per line (newline-joined; polyline characters
+     * never include a newline). Null when unknown: haversine plans, an OSRM outage when the
+     * cab was written, or a cab stored before geometry existed.
+     */
+    @Column(name = "route_legs", columnDefinition = "text")
+    private String routeLegs;
+
     /** Stops in the order the driver visits them. */
     @OneToMany(mappedBy = "cab", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("sequence")
@@ -70,6 +79,15 @@ public class CabRoute {
         this.maxRideMinutes = maxRideMinutes;
         this.escortRequired = escortRequired;
         this.officeTime = officeTime;
+    }
+
+    public void setRouteLegs(List<String> legs) {
+        this.routeLegs = legs == null || legs.isEmpty() ? null : String.join("\n", legs);
+    }
+
+    /** The encoded legs, or an empty list when unknown. */
+    public List<String> routeLegs() {
+        return routeLegs == null ? List.of() : List.of(routeLegs.split("\n", -1));
     }
 
     public boolean carries(long employeeId) {
