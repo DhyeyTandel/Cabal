@@ -635,7 +635,7 @@ in a browser.
 **Scale/limits** — Playback updates DOM text and classes only when the minute changes,
 so 7 to 10 cabs with 40 riders stay cheap; not profiled on a low-end phone.
 
-## 2026-10-08: Self-host OSRM for road distances and road-shaped routes
+## [2026-10-08] Self-host OSRM for road distances and road-shaped routes
 
 **Context**
 Travel times on the live site came from haversine with a 1.4 circuity factor, and every
